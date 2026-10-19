@@ -13,5 +13,6 @@ wheels/
 .env.*
 !.env.example
 .DS_Store
+plans/
 part1/work/
 part1/outputs/
