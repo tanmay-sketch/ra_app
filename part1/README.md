@@ -1,115 +1,137 @@
 # Part 1: Stated Values
 
-## Findings and nontechnical summary
+## Scope and findings
 
-**220 of 450 company-years (48.9%) have usable text**, covering **45 companies**;
-six have all nine years. Coverage rises from 14 companies in 2016 to 38 in 2024,
-limiting historical comparisons. Of 171 comparable adjacent-year pairs, 106 differ
-in wording and 65 are unchanged. Page changes need not indicate changed values.
+Archived English About Us, mission, values or equivalent pages represent stated
+values for 2016–2024. The supplied 50-company roster contains ten companies per
+sector. Fixed membership and sector labels support comparisons across years and
+parts; January 2024 membership and market-cap rankings were not independently
+reconstructed.
+
+**Usable text covers 220 of 450 company-years (48.9%) and 45 companies.** Six
+companies have all nine years. Coverage rises from 14 companies in 2016 to 38 in
+2024, so sample changes can distort trends. Of 171 comparable adjacent-year pairs,
+106 differ in wording and 65 are unchanged.
 
 Morgan Stanley's page expands from four named values in [2020][ms-2020] to five
 in [2021][ms-2021], adding “Commit to Diversity & Inclusion.” Diversity and
-belonging already appeared in 2020; this formalizes an existing emphasis rather
-than proving changed conduct.
+belonging already appeared in 2020: the change formalizes an existing emphasis
+without establishing changed conduct. Part 2 comparisons therefore require
+matched observations and inspection of the statements.
 
-Compare matched company-years against Part 2 disclosures; inspect changed passages
-before interpreting similarity scores or sector-wide trends.
+## Research decisions
 
-## What was done and why
+**One official page per company.** Official-domain searches, reviewed historical
+links and homepage links supply up to three candidates for Wayback CDX checks.
+An LLM selects a company-wide overview, mission, values or principles page,
+preferring broader historical coverage. Product, support, news and
+recruitment-only pages are excluded. Reusing an accepted URL improves consistency
+but can miss historical URL migrations.
 
-**Scope.** Target one English About Us, mission, values or equivalent page per year,
-2016–2024, for the supplied 50-company roster: ten each in Technology, Financials,
-Healthcare, Consumer Discretionary and Energy. The roster and sector labels are
-treated as fixed; January 2024 S&P 500 membership and market-cap rankings were not
-independently reconstructed.
+**A bounded annual sample.** Successful HTML captures are indexed monthly. The
+capture nearest July 1 is tried first, then distinct earliest/latest captures,
+with at most three attempts per year. The midpoint gives a consistent target;
+alternatives allow recovery without exhaustive retries. One browser replay per
+year can recover JavaScript content. Bounded failure does not prove archive
+absence.
 
-### Collection
+**Comparable archived text.** Redirects allow five hops, ending within the target
+year on the same corporate host or a reviewed rebrand host. Live content, errors
+and navigation- or statistics-only captures are rejected. Trafilatura removes
+navigation, footers, cookie notices and boilerplate, with a main-content fallback.
+At least 25 substantive words are required to exclude empty page shells.
+Accepted text survives reruns unless a quality rejection is recorded.
 
-1. **Select the page.** Search official domains, reviewed historical links and,
-   when needed, the homepage. Check up to three candidates with the Wayback CDX
-   API. The LLM prefers company-wide commitments and broader archived coverage.
-   Exclude pages limited to product, support, news or recruitment content.
-   Reuse accepted URLs.
+**Contextual classification.** `gpt-4o-mini-2024-07-18` assigns categories and a
+short page note. Compared with keywords, contextual classification accommodates
+paraphrases and distinguishes commitments from headings, statistics or historical
+achievements. Source lines supporting labels are copied into the audit, allowing
+inspection without guaranteeing correct interpretation.
 
-2. **Choose annual captures.** From successful HTML records, collapsed monthly,
-   try the capture nearest July 1, then the earliest/latest distinct captures:
-   **at most three per year**, stopping at the first usable result. Allow one
-   browser replay per year for incomplete JavaScript pages. This bounds runtime.
+Ten categories span conduct, capabilities, stakeholders and wider
+responsibilities, supporting comparison across sectors and with disclosures:
 
-3. **Validate and clean.** Follow at most five redirect hops; require a same-year
-   archived response on the same corporate host or a reviewed rebrand host.
-   Reject live/out-of-year content, errors and statistics/navigation-only pages.
-   Trafilatura extracts visible body text, removing navigation, footers, controls,
-   cookie notices and boilerplate. Main content is a fallback; require at least
-   25 substantive words.
-
-### Analysis
-
-`gpt-4o-mini-2024-07-18` assigns categories and a short current-page note, citing
-source-line indexes; code copies the evidence directly. Categories cover ethical
-conduct, capabilities, stakeholders and wider responsibilities, using one
-vocabulary across sectors:
-
-| Category | Meaning |
+| Category | Stated commitment |
 | --- | --- |
-| Integrity | Ethics |
-| Innovation | Invention |
-| Quality | Product/service excellence |
-| Safety | Organizational safety/security |
-| Customers | Customer/patient needs |
-| Employees | Employee support |
+| Integrity | Ethics, honesty and accountability |
+| Innovation | Research, invention and new capabilities |
+| Quality | Reliable, excellent products and services |
+| Safety | Protection of people, data and privacy |
+| Customers | Customer or patient needs and outcomes |
+| Employees | Wellbeing, fair conditions and development |
 | Inclusion | Diversity, equity and accessibility |
-| Environment | Environmental impact |
-| Community | Societal contribution |
-| Shareholders | Shareholder value |
+| Environment | Emissions, resources and environmental protection |
+| Community | Philanthropy, volunteering and social contribution |
+| Shareholders | Long-term shareholder value and financial discipline |
 
-Labels require stated commitments, not isolated keywords or statistics.
-`changed_from_prior` is **0** for identical whitespace-normalized text, **1**
-for different text, and blank without comparable adjacent years. This rule is
-reproducible. `text-embedding-3-small` cosine measures whole-page similarity
-between comparable adjacent years.
+## Measures and calculations
 
-## Gaps, assumptions and limitations
+Comparisons require usable text in consecutive years **from the same source
+page**. Missing years and page substitutions are not bridged. Let `A` and `B`
+denote the previous and current texts after collapsing whitespace:
 
-- **230 missing observations:** 170 have no eligible in-year captures for the
-  selected URL, 45 have no selected URL, and 15 failed extraction/rendering checks.
-  AVGO, INTC, MDT, COP and VLO are entirely missing. Each gap has a CSV reason and
-  audit details. Bounded failure does not prove archive absence. No years are
-  imputed.
-- One capture represents a year, and equivalent pages represent stated values.
-  One URL per company improves consistency but misses historical URL migrations.
-  Saved text survives reruns unless an explicit quality rejection is recorded.
-- Redesigns, incomplete captures, histories and video transcripts can distort
-  similarity. Labels are provisional; source references verify attribution, not
-  semantic correctness. `[]` means no categories assigned; blank means unavailable
-  or unassessed.
-- Notes summarize current pages. Paired linguistic shifts were checked
-  illustratively, not comprehensively. Public statements and similarity do not
-  establish actual behavior or authenticity.
+```text
+changed_from_prior = 0 if A = B; 1 otherwise
+```
 
-## With more time
+Unavailable comparisons stay blank. This reproducible rule records small edits
+as changes without judging their importance or identifying changed values.
 
-Verify the January 2024 roster/rankings; map historical URL changes for missing
-years; independently review category assignments; and compare matched mission and
-values sections to separate linguistic shifts from redesigns and extraction loss.
+For nonidentical texts, `text-embedding-3-small` supplies vectors `a` and `b`:
 
-## Code, outputs and reproduction
+```text
+similarity = dot(a, b) / (length(a) × length(b))
+```
 
-- Code: [`../src/part1/`](../src/part1/) and [`../main.py`](../main.py).
-- [`outputs/dataset.csv`](outputs/dataset.csv): one row per company-year, including
-  `ticker`, `company_name`, `sector`, `year`, `page_text_clean`,
-  `changed_from_prior`, `theme_categories`, `analyst_notes`, plus `snapshot_url`
-  and `page_similarity_to_prior_year`.
-- [`outputs/audit.jsonl`](outputs/audit.jsonl): source choices, capture attempts,
-  gap reasons, extraction checks, category evidence and request counts.
+Cosine ranges from −1 to 1; higher scores indicate closer semantic content.
+Identical texts receive 1 directly. Separating similarity from the change flag
+distinguishes an exact edit from its semantic size; redesigns and extraction
+loss can affect both.
 
-Set `OPENAI_API_KEY` in the root `.env`, then run from the root:
+## Dataset columns
+
+[`outputs/dataset.csv`](outputs/dataset.csv) contains one row per company-year,
+including missing observations.
+
+| Column | Meaning and reason for inclusion |
+| --- | --- |
+| `ticker` | Fixed company identifier for matching across parts. |
+| `company_name` | Readable company label from the roster. |
+| `sector` | Fixed sector label for group comparisons. |
+| `year` | Target archive year, 2016–2024. |
+| `page_text_clean` | Retained body text supporting analysis and inspection. |
+| `changed_from_prior` | Exact adjacent-year wording-change flag defined above. |
+| `theme_categories` | JSON list of supported categories; `[]` means none assigned, blank means unassessed. |
+| `analyst_notes` | Short current-page observation, unchanged-text note or reason analysis/text is unavailable. |
+| `snapshot_url` | Accepted Wayback replay URL for source verification. |
+| `page_similarity_to_prior_year` | Whole-page cosine similarity; blank when unavailable. |
+
+The local audit records page selection, capture attempts, extraction checks,
+category evidence and request usage.
+
+## Limitations and next steps
+
+The **230 gaps** comprise 170 observations without eligible in-year captures for
+the selected URL, 45 without a selected URL and 15 rejected during extraction or
+rendering. AVGO, INTC, MDT, COP and VLO have no usable observations. Gap reasons
+remain in the CSV and audit; no text or year is imputed.
+
+One capture represents a year; public statements describe priorities rather than
+behavior. Paired linguistic shifts were examined illustratively. Further work
+would verify the roster, map historical URLs, independently review labels and
+compare matched mission/values sections to separate substantive shifts from
+redesigns.
+
+## Reproduction
+
+Code is in [`../src/part1/`](../src/part1/) and [`../main.py`](../main.py).
+Execution requires `OPENAI_API_KEY` in the root `.env`. From the repository root:
 
 ```sh
 uv sync
-uv run playwright install chromium  # Once
-uv run python main.py               # Resume; preserve accepted text
-uv run python main.py AVGO           # Explicitly retry this company's gaps
+uv run playwright install chromium  # First setup
+uv run python main.py               # Resume, preserving accepted text
+uv run python main.py AVGO           # Retry gaps for an explicit ticker
 ```
 
 [ms-2020]: https://web.archive.org/web/20200624220438id_/https://www.morganstanley.com/about-us/morgan-stanley-core-values
