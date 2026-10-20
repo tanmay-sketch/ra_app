@@ -1,150 +1,143 @@
-# Part 2: Lived Values
+# Part 2 — Lived Values: Proxy Statement Analysis
 
-Collect annual **DEF 14A proxy statements** for the same 50 companies as Part 1,
-2016–2024. Proxies provide comparable disclosures about governance, incentives
-and corporate priorities. They describe reported priorities, not verified conduct.
+## Scope, sourcing and coverage
 
-## Run
+Analyze annual **DEF 14A proxy statements** for Part 1's 50 companies, 2016–2024.
+This consistent document type describes governance, incentives and reported
+priorities; it does not verify conduct.
 
-From the repository root:
+SEC provides dated primary filings and stable identifiers. Search
+[EDGAR](https://www.sec.gov/edgar/search/) by issuer, filing year and form, then
+follow **preview → Open document**. Retain the first complete proxy
+confirming the issuer and meeting year; exclude exhibits, supplements and
+special-meeting-only filings. Check the preceding filing year if needed, with
+at most three candidates per missing year. Preserve successful sources on reruns.
 
-```sh
-uv sync
-uv run playwright install chromium
-uv run python -m src.part2 --pilot        # Six companies, four years
-uv run python -m src.part2 META --years 2020 2024
-uv run python -m src.part2                # All 50 companies, all nine years
-uv run python -m src.part2 --analyze-only # Saved text; no browser or API calls
-```
+As of **20 October 2026**, [dataset.csv](outputs/dataset.csv) contains **450 rows,
+421 retained proxies (93.6%), 49 represented companies and 360 adjacent-year
+comparisons**. Retained company-years by sector, each out of 90: Technology 86,
+Financials 86, Healthcare 88, Consumer Discretionary 75 and Energy 86.
 
-Set `SEC_USER_AGENT="Researcher Name contact@example.com"` in the root `.env`.
-Collection opens an isolated, visible Chromium window. `--headless` is optional;
-headless Chromium was blocked in the earlier browser test. `--collect-only`
-skips analysis. Existing successful documents are retained; missing selected
-years are retried, with at most three candidate documents per meeting year.
+The 29 gaps are nine Target issuer-selection failures, ten browser timeouts and
+ten document-identity/extraction failures. Reasons appear in `analyst_notes`;
+failure does not establish that a filing is unavailable.
 
-Tone uses the official [Loughran–McDonald master dictionary][lm], 1993–2025 edition.
-The file checksum is recorded in the audit. Download its CSV to `part2/work/Loughran-McDonald_MasterDictionary_1993-2025.csv`,
-or pass `--dictionary /path/to/master.csv`. No paid models or API keys are needed.
-A missing dictionary leaves tone blank, with an explanation; themes and wording
-similarity still run.
+## Text preparation and method choice
 
-## Collection and extraction
+Extract HTML/native PDF text; scanned pages require reviewed OCR. Remove navigation,
+voting instructions, repeated margins, numeric tables and identified shareholder
+proposals, retaining company responses. Use nonoverlapping narrative paragraphs.
 
-The collector follows [SEC full-text search][search] in the browser:
+Local spaCy phrases, financial dictionary tone and TF–IDF provide inexpensive,
+inspectable measures. Ten themes align with Part 1 for later comparison:
+**Integrity, Innovation, Quality, Safety, Customers, Employees, Inclusion,
+Environment, Community and Shareholders**. The [phrase vocabulary](../src/part2/themes.py)
+distinguishes product quality from audit controls and environmental policy from
+financial sustainability.
 
-1. Enter the ticker or historical CIK in the company field and select the exact
-   autocomplete issuer.
-2. Set January 1–December 31 filing dates and the exact `DEF 14A` filing type.
-   Search with `proxy`; retry with blank keywords if no primary results appear.
-3. Select a primary filing result, open its preview, then click **Open document**.
-4. Verify the issuer and annual-meeting year from the document. Exclude exhibits,
-   preliminary/supplemental filings and special-meeting-only proxies.
-5. If needed, check the preceding filing year, then record a specific gap.
+## Dataset columns
 
-`year` means **annual-meeting year**, not fiscal year or the search's “Reporting
-for” field. Exact meeting dates may be blank when only the year is unambiguous.
-The first complete matching annual proxy is retained. Historical issuer overrides
-cover Broadcom's redomiciliation and Exxon/BlackRock holding-company changes.
-The supplied company roster and sector assignments are inherited from Part 1.
+One row represents a company–meeting-year. Uncollected source fields remain blank.
 
-One browser worker spaces SEC requests by at least 0.3 seconds, below the
-[SEC's aggregate limit of 10 requests/second][access]. HTTP 403/429 pauses collection
-and saves progress. There is no submissions-API discovery fallback.
-
-HTML uses its body text; PDFs use embedded text first. Remove navigation, voting
-logistics, repeated margins, numeric tables and identified shareholder-proposal
-text; retain identifiable company responses. Nonoverlapping paragraphs retain
-source locators and section labels for review. Optional [DeepSeek-OCR-2][ocr]
-handles scanned PDF pages in a separate CUDA environment via `PART2_OCR_PYTHON`.
-OCR pages require source review before use; this GPU path is untested on this Mac.
-
-## Measures
-
-All measures use retained issuer narrative and the same alphabetic word-count
-rule. Vocabulary and matched paragraph references are saved for inspection.
-
-- **Themes:** local spaCy phrase matching using the reviewed vocabulary in
-  [`themes.py`](../src/part2/themes.py). The ten shared categories cover Integrity
-  (ethics), Innovation, Quality (products/services), Safety (including privacy),
-  Customers, Employees, Inclusion, Environment, Community and Shareholders
-  (returns/capital allocation). These connect stated values to disclosure emphasis.
-  Specific phrases avoid conflating executive pay with employee welfare or
-  financial sustainability with environmental policy. Paragraphs may have multiple
-  themes or none.
-- **`theme_shares[k]`** = words in paragraphs matching theme k / all analyzed words.
-  Shares range from 0 to 1 and may sum above 1 because themes overlap.
-- **`tone_rates[k]`** = dictionary word occurrences / all analyzed words × 1,000,
-  for `positive`, `negative` and `uncertainty`. Removed dictionary entries are
-  excluded. Negation and legal context are not interpreted.
-- **`similarity_to_prior`:** TF–IDF unigram/bigram cosine against the immediately
-  preceding meeting year. Vocabulary and IDF are frozen on the first analyzed
-  corpus. Gaps are never bridged; unavailable comparisons stay blank.
-- **Notes:** observed theme/tone shifts, wording similarity, extraction issues or
-  specific collection gaps. These are descriptive calculations, without LLM claims
-  about motives or causality.
-
-A computed zero is valid; an unavailable measure is blank. Sector means weight
-companies equally and report sample counts. Adjacent changes use the same
-companies in both years. Dated COVID-19 and SEC pay-versus-performance reference
-points support descriptive comparisons, not causal claims.
-
-## Outputs and schema
-
-`outputs/dataset.csv` has one row for each of the 450 company-years, including
-documented gaps. Text is stored separately; there is no `status` column.
-
-| Column | Meaning and purpose |
+| Column | Definition and reason for inclusion |
 | --- | --- |
-| `ticker` | Company join key shared with Part 1. |
-| `company_name` | Human-readable company identity. |
-| `sector` | Supplied sector for comparisons. |
-| `year` | Verified annual-meeting year. |
-| `filing_date` | Publication date for event comparisons. |
-| `meeting_date` | Exact meeting date when confirmed. |
-| `accession` | Unique SEC filing identifier. |
-| `source_url` | Direct original-document URL. |
-| `text_file` | Clean-text path relative to `part2/outputs/`. |
-| `theme_shares` | JSON word-weighted paragraph shares for the ten themes. |
-| `tone_rates` | JSON positive/negative/uncertainty occurrences per 1,000 words. |
-| `similarity_to_prior` | Adjacent-year wording cosine, from 0 to 1. |
-| `analyst_notes` | Measured shifts, limitations or gap explanation. |
+| `ticker` | Roster identifier; joins companies to Part 1. |
+| `company_name` | Readable company identity. |
+| `sector` | Roster sector; supports group comparisons. |
+| `year` | Annual-meeting year, verified when a proxy is retained; panel time key. |
+| `filing_date` | SEC filing date; places disclosures relative to events. |
+| `meeting_date` | Exact meeting date when confirmed; supports year verification. |
+| `accession` | SEC filing identifier; enables source verification. |
+| `source_url` | Direct primary-document URL; makes the source traceable. |
+| `text_file` | Clean-text path relative to `part2/outputs/`; keeps document text outside the CSV. |
+| `theme_shares` | JSON shares for all ten themes; measures paragraph-level emphasis. |
+| `tone_rates` | JSON positive, negative and uncertainty occurrences per 1,000 words; adjusts for document length. |
+| `similarity_to_prior` | TF–IDF cosine against the preceding meeting year; measures wording continuity. |
+| `analyst_notes` | Calculated shifts, extraction warnings or gap reasons; supports interpretation and review. |
 
-`outputs/text/` contains cleaned documents. Compact `audit.jsonl` records source
-hashes, extraction locators, matched phrases and method settings without duplicating
-full text. `summary.json` contains coverage, sector means, balanced changes and
-event-spanning pairs; figures visualize available coverage and themes.
-`tfidf.json.gz` preserves the frozen vocabulary and IDF so the published
-comparisons can be reproduced. Original HTML/PDF files, the dictionary and browser
-profile remain in ignored `part2/work/`. The old CSV/audit are preserved there as
-a migration backup.
+## Calculations
 
-## Findings and limitations
+As implemented in [analyze.py](../src/part2/analyze.py), let $w_p$ be paragraph p's
+word count and $W=\sum_p w_p$. Theme/tone words are
+alphabetic sequences allowing internal apostrophes or hyphens. Missing measures
+are blank; a calculated zero is valid.
 
-The dataset currently contains **33 usable proxies across eight companies**, all
-with theme and tone measures, and **10 adjacent-year comparisons**. The six-company,
-four-year pilot is complete (24/24). Four previously rejected cached proxies were
-recovered, and all 27 earlier sources were preserved. The remaining 417 rows are
-unfilled and retain their collection explanations.
+**Theme shares.** A case-insensitive phrase match labels the entire paragraph:
 
-Live browser tests verified Meta's 2020 and 2024 primary proxies, including preview
-→ Open document and sequential year searches. Source checks corrected meeting
-dates, procedural boilerplate and shareholder-proposal attribution. Coverage is
-too sparse and uneven for population or sector-trend conclusions.
+$$
+S_k=\frac{\sum_p w_p\,\mathbf{1}(p\text{ matches theme }k)}{W}.
+$$
 
-Phrase matching is transparent and inexpensive but misses paraphrases and may
-label an entire paragraph from a brief mention. Executive-pay-heavy proxies,
-changing document composition, extraction artifacts and incomplete coverage limit
-interpretation. Cross-part comparisons must account for these genre differences.
-The dictionary is financial rather than contextual sentiment analysis. Browser
-access can be blocked even below the SEC rate limit.
+Each paragraph counts once per theme; unmatched paragraphs remain in W. Overlapping
+themes can sum above 1. Shares measure paragraph emphasis, not individual value words.
 
-Before substantive authenticity conclusions, finish collection and source-review
-gaps. With more time, independently label a balanced passage sample, measure
-classification errors, improve verified historical-issuer coverage, and check
-results within comparable sections and a constant company sample.
+**Tone rates.** Use the 1993–2025 [Loughran–McDonald dictionary](https://sraf.nd.edu/loughranmcdonald-master-dictionary/),
+retaining positive membership flags and excluding removed entries. For each
+category c ∈ {positive, negative, uncertainty}:
 
-[search]: https://www.sec.gov/edgar/search/
-[access]: https://www.sec.gov/about/developer-resources
-[lm]: https://sraf.nd.edu/loughranmcdonald-master-dictionary/
-[ocr]: https://github.com/deepseek-ai/DeepSeek-OCR-2
+$$
+R_c=1000\times\frac{\text{matching word occurrences in category }c}{W}.
+$$
+
+Count occurrences, not distinct words; negation and context are not interpreted.
+
+**Wording similarity.** Lowercase unigrams/bigrams use scikit-learn's default
+word tokens of at least two characters, including numeric tokens, without stopword
+removal. This differs from theme/tone tokenization. For term j in document d:
+
+$$
+v_{dj}=(1+\ln f_{dj})\left[\ln\frac{1+N}{1+df_j}+1\right],\qquad
+C_{it}=\frac{v_{it}\cdot v_{i,t-1}}{\|v_{it}\|_2\|v_{i,t-1}\|_2}.
+$$
+
+Here f is term frequency, df document frequency and N fit-corpus size; absent
+terms have zero weight. Vocabulary/IDF remain frozen from the initial 32 proxies;
+unseen terms are ignored. Cosine ranges from 0 to 1; higher means more similar
+wording. Missing adjacent years or empty vectors leave cosine blank.
+
+**Changes and aggregation.** Theme changes are $100(S_{itk}-S_{i,t-1,k})$
+percentage points; tone changes are $R_{itc}-R_{i,t-1,c}$. Notes list up to two
+largest theme changes reaching 1 point and the largest tone change reaching 0.1
+matches/1,000 words. These are reporting cutoffs, not significance tests.
+
+For measure m, sector means give each available company equal weight:
+
+$$
+\bar m_{st}=\frac{1}{|A_{st}|}\sum_{i\in A_{st}}m_{it},\qquad
+\Delta\bar m_{st}=\frac{1}{|B_{st}|}\sum_{i\in B_{st}}(m_{it}-m_{i,t-1}).
+$$
+
+A contains available companies; B contains those available in both adjacent years.
+Sample counts are reported; membership may change across year pairs.
+
+## Observed differences and event comparisons
+
+- **Within company:** Microsoft's Safety share rose from 3.94% in 2023 to 10.01%
+  in 2024; wording cosine was 0.758.
+- **Across sectors:** 2024 Environment shares averaged 9.09% in Energy versus
+  2.04% in Healthcare, with ten companies in each sector.
+- **COVID-19:** 44 adjacent filing pairs spanning the
+  [11 March 2020 pandemic announcement](https://www.who.int/news-room/speeches/item/who-director-general-s-opening-remarks-at-the-media-briefing-on-covid-19---11-march-2020)
+  showed mean Safety emphasis +0.57 percentage points and negative tone
+  +0.43 matches/1,000 words.
+- **Disclosure regulation:** 44 pairs spanning the
+  [25 August 2022 pay-versus-performance rule adoption](https://www.sec.gov/newsroom/press-releases/2022-149)
+  showed Shareholders emphasis +0.12 points and uncertainty +0.31 matches/1,000.
+  The rule applies to relevant disclosures for fiscal years ending on or after
+  16 December 2022; adoption and application dates differ.
+
+Event pairs satisfy `prior_filing_date < event_date <= current_filing_date`.
+Intervals include unrelated changes and potentially text prepared before the event;
+coincidence does not establish causality.
+
+## Limitations and next steps
+
+Phrase labels lack independent validation and may miss paraphrases or overlabel
+long paragraphs. Proxies emphasize governance/pay, while redesigns and disclosure
+rules affect comparability. **51 retained rows carry extraction warnings**; each
+event sample includes five flagged pairs. Gaps and the fixed vocabulary also limit
+interpretation.
+
+Only the CSV is tracked; text, audit evidence and the frozen fit remain local.
+Exact cosine reproduction requires that fit. Next: review flagged passages/gaps,
+validate labels independently, and compare consistent sections and company samples.
