@@ -15,3 +15,6 @@ wheels/
 .DS_Store
 plans/
 part1/work/
+part2/work/
+part2/outputs/*
+!part2/outputs/dataset.csv
