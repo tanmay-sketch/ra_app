@@ -22,25 +22,25 @@ Across complete company-year observations, the index has a mean of **68.59**, me
 **Value alignment** asks whether a company's disclosed emphasis supports each theme it explicitly states. For company `i`, theme `t`, and year `y`:
 
 ```text
-benchmark(t,y) = max(mean proxy theme share of other sector-year firms, 0.005)
-support(i,t,y) = theme_share(i,t,y) / (theme_share(i,t,y) + benchmark(t,y))
+benchmark(i,t,y) = max(mean proxy theme share of other sector-year firms, 0.005)
+support(i,t,y) = theme_share(i,t,y) / (theme_share(i,t,y) + benchmark(i,t,y))
 alignment(i,y) = 100 * mean(support over company i's stated themes)
 ```
 
-Each peer receives equal weight; the focal company is excluded, and at least five usable sector-year peers are required. Only *stated* themes enter the average, so discussing additional legitimate priorities is not automatically penalized. A benchmark-matched share scores 50 where the floor does not bind; zero observed support scores zero. An empty or unavailable stated-theme assessment cannot yield alignment.
+Each peer receives equal weight; the focal company is excluded, and at least five sector-year peers with usable Part 2 shares are required. Peers do not need Part 1 coverage. Only *stated* themes enter the average, so discussing additional legitimate priorities is not automatically penalized. A benchmark-matched share scores 50 where the floor does not bind; zero observed support scores zero. An empty or unavailable stated-theme assessment cannot yield alignment.
 
-**Identity coherence** measures backtracking in ten-theme proxy profiles. Adjacent-year change is `1 - cosine_similarity`. A substantial move is at least **0.0760373**, the pooled 75th-percentile distance among 360 valid adjacent-year transitions. For three consecutive profiles `A, B, C`, a reversal requires substantial `A->B` and `B->C` moves and `distance(A,C) < min(distance(A,B), distance(B,C))`.
+**Identity coherence** measures backtracking in ten-theme proxy profiles. Adjacent-year change is `1 - cosine_similarity`. A substantial move is at least **0.0760373**, the linearly interpolated 75th-percentile distance among 360 valid adjacent-year transitions pooled across the full period. For three consecutive profiles `A, B, C`, a reversal requires substantial `A->B` and `B->C` moves and `distance(A,C) < min(distance(A,B), distance(B,C))`.
 
 ```text
 coherence(i,y) = 100 * (1 - reversals / eligible three-year windows)
 authenticity_index(i,y) = (alignment(i,y) + coherence(i,y)) / 2
 ```
 
-Coherence uses uninterrupted history ending in the target year, with at least four consecutive usable years; a gap or all-zero profile resets it. This operationalization permits lasting change and penalizes only qualifying returns toward an earlier profile. The composite weights alignment and coherence equally as a transparent modeling choice, not an empirically estimated optimum.
+Coherence counts all overlapping three-year windows in the uninterrupted history ending in the target year, with at least four consecutive usable years; a gap or all-zero profile resets it. This operationalization permits lasting change and penalizes only qualifying returns toward an earlier profile. The composite weights alignment and coherence equally as a transparent modeling choice, not an empirically estimated optimum.
 
 ## Checks, threats to validity, and improvements
 
-Sensitivity checks vary component weights (70/30 and 30/70), the substantial-change threshold (60th and 90th percentiles), and the alignment benchmark floor (0.001 and 0.01). They also exclude extraction-warning observations. Comparisons use matched company-years with both components, while losses of coverage are tracked separately.
+Sensitivity checks vary component weights (70/30 and 30/70), the substantial-change threshold (60th and 90th percentiles), and the alignment benchmark floor (0.001 and 0.01). A further check excludes extraction-warning company-years from both components and recalculates peer benchmarks, the threshold, and coherence histories. Comparisons use matched company-years with both components, while losses of coverage are tracked separately.
 
 Targeted source checks illustrate both potential correspondence and false signals. In particular, NVIDIA's stock-plan appendices alter keyword-matched proxy profiles, so a low or unstable score does **not** establish weak corporate conduct. A coherence score of 100 means only that no qualifying reversals were detected. Threats include sparse historical About pages, changing page scope, duplicated or procedural proxy text, ambiguous theme matches, and overlapping coherence histories. Full-period calibration and cases where About captures follow proxy filings also preclude interpreting the scores as prospective signals.
 
