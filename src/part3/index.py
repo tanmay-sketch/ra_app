@@ -191,6 +191,9 @@ def score(observations, *, alignment_weight=0.5, percentile=0.75,
                 "value_alignment": alignment,
                 "identity_coherence": identity,
                 "authenticity_index": combined,
+                "score_basis": ("both" if alignment is not None and identity is not None
+                                else "alignment_only" if alignment is not None
+                                else "coherence_only" if identity is not None else "unavailable"),
                 "identity_change": changes[key],
                 "transition_status": evidence["transition_status"],
                 "part1_available": observation["part1_available"],
@@ -219,70 +222,3 @@ def score(observations, *, alignment_weight=0.5, percentile=0.75,
         "excluded_count": len(excluded),
     }
     return [results[item["ticker"], item["year"]] for item in observations], metadata
-
-
-def company_scores(annual_rows, *, alignment_weight=0.5):
-    """Average each observed component first, then combine the available means."""
-    if not isfinite(alignment_weight) or not 0 <= alignment_weight <= 1:
-        raise ValueError("Alignment weight must be between zero and one.")
-    companies = defaultdict(list)
-    for row in annual_rows:
-        companies[row["ticker"]].append(row)
-
-    # Annual gaps and transient labels do not describe the whole study period.
-    annual_flags = {"history_reset", "insufficient_history", "provisional_change",
-                    "part1_missing", "part2_missing", "no_stated_themes",
-                    "too_few_sector_peers"}
-    results = []
-    for ticker, rows in companies.items():
-        alignment = [row["value_alignment"] for row in rows
-                     if row["value_alignment"] is not None]
-        identity = [row["identity_coherence"] for row in rows
-                    if row["identity_coherence"] is not None]
-        alignment_mean = fsum(alignment) / len(alignment) if alignment else None
-        identity_mean = fsum(identity) / len(identity) if identity else None
-        components = [(alignment_mean, alignment_weight), (identity_mean, 1 - alignment_weight)]
-        available = [(value, weight) for value, weight in components if value is not None]
-        weight_sum = fsum(weight for _, weight in available)
-        combined = (fsum(value * weight for value, weight in available) / weight_sum
-                    if weight_sum else None)
-        basis = ("both" if alignment and identity else "alignment_only" if alignment
-                 else "coherence_only" if identity else "unavailable")
-        part1_years = sum(bool(row["part1_available"]) for row in rows)
-        part2_years = sum(bool(row["part2_available"]) for row in rows)
-        flags = list(dict.fromkeys(flag for row in rows for flag in row["quality_flags"]
-                                   if flag not in annual_flags))
-        if not part1_years:
-            flags.append("part1_missing")
-        if not part2_years:
-            flags.append("part2_missing")
-        if not alignment:
-            flags.append("alignment_unavailable")
-            if part1_years and not any(row.get("stated_theme_count") for row in rows):
-                flags.append("no_stated_themes")
-        if not identity:
-            flags.append("coherence_unavailable")
-
-        note = (f"Alignment averages {len(alignment)} annual scores; "
-                f"coherence averages {len(identity)} annual scores. ")
-        if available and not weight_sum:
-            basis = "unavailable"
-            note += "The available component has zero configured weight."
-        elif basis == "both":
-            note += "The period score combines the two component means."
-        elif basis == "alignment_only":
-            note += "The score reflects alignment only; disclosure coherence is unmeasured."
-        elif basis == "coherence_only":
-            note += "The score reflects disclosure coherence only; stated-value alignment is unmeasured."
-        else:
-            note += "Neither component could be scored."
-
-        results.append({
-            "ticker": ticker, "company_name": rows[0]["company_name"], "sector": rows[0]["sector"],
-            "value_alignment": alignment_mean, "identity_coherence": identity_mean,
-            "authenticity_index": combined, "score_basis": basis,
-            "part1_years": part1_years, "part2_years": part2_years,
-            "alignment_years": len(alignment), "coherence_years": len(identity),
-            "quality_flags": list(dict.fromkeys(flags)), "analyst_notes": note,
-        })
-    return results

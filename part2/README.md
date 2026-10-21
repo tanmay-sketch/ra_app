@@ -119,6 +119,15 @@ The [implementation](../src/part2/analyze.py) calculates within-company theme an
 
 **Measurement validity.** Proxy statements capture governance disclosures rather than verified conduct. Phrase matching may miss context or overlabel paragraphs, and the theme categories lack independent human validation. Part 1 commitment labels are not directly equivalent to Part 2 paragraph shares.
 
+A targeted check of Berkshire Hathaway's 2016 and 2024 proxies, documented in
+[Part 4](../part4/README.md#preliminary-findings), found Inclusion matches in
+procedural wording about including shareholder proposals in a proxy statement
+and in a statement rejecting diversity as a director-selection criterion.
+Community matches largely concerned directors' charitable-foundation backgrounds.
+The matcher counts whole paragraphs without resolving these contexts. Such
+matches do not establish affirmative company commitments and can affect both
+Part 3 scores and Part 4 clusters.
+
 **Comparability.** Regulatory requirements, document composition, and the frozen TF–IDF vocabulary can influence observed changes. Event windows may overlap, and no causal controls or significance tests have been applied.
 
 **Data quality.** Fifty-one retained filings have extraction warnings, including five flagged pairs in each event comparison. Coverage is uneven across sectors, particularly Consumer Discretionary.

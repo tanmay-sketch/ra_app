@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from src.part3.data import THEMES, load_inputs
-from src.part3.index import company_scores, coherence, cosine_distance, score, value_alignment
+from src.part3.index import coherence, cosine_distance, score, value_alignment
 from src.tickers import TICKERS
 
 
@@ -115,6 +115,32 @@ class CoherenceTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_annual_composite_requires_both_components_and_four_consecutive_years(self):
+        observations = [observation(t, year) for t in list(TICKERS)[:6]
+                        for year in range(2016, 2021)]
+        for row in observations:
+            if row["year"] == 2020 and row["ticker"] in ("MSFT", "AAPL"):
+                row.update(part1_available=False, stated=None)
+                if row["ticker"] == "AAPL":
+                    row.update(part2_available=False, shares=None)
+        rows, _ = score(observations)
+        by_key = {(row["ticker"], row["year"]): row for row in rows}
+        for row in rows:
+            if row["year"] < 2019:
+                self.assertIsNone(row["identity_coherence"])
+                self.assertIsNone(row["authenticity_index"])
+                self.assertEqual(row["score_basis"], "alignment_only")
+        full = by_key["MSFT", 2019]
+        self.assertEqual(full["score_basis"], "both")
+        self.assertAlmostEqual(full["authenticity_index"], 75)
+        partial = by_key["MSFT", 2020]
+        self.assertEqual(partial["score_basis"], "coherence_only")
+        self.assertEqual(partial["identity_coherence"], 100)
+        self.assertIsNone(partial["authenticity_index"])
+        missing = by_key["AAPL", 2020]
+        self.assertEqual(missing["score_basis"], "unavailable")
+        self.assertIsNone(missing["authenticity_index"])
+
     def test_quality_exclusion_recomputes_peers_and_history(self):
         tickers = list(TICKERS)[:6]
         observations = [observation(t, year, warning=t == tickers[-1] and year == 2018)
@@ -156,74 +182,40 @@ class PipelineTests(unittest.TestCase):
             with self.subTest(setting=setting), self.assertRaises(ValueError):
                 score([], **setting)
 
-
-class CompanyTests(unittest.TestCase):
-    @staticmethod
-    def annual(ticker, year, alignment=None, identity=None, *, part1=True, part2=True, flags=()):
-        return {
-            "ticker": ticker, "company_name": TICKERS[ticker]["name"],
-            "sector": TICKERS[ticker]["sector"], "year": year,
-            "value_alignment": alignment, "identity_coherence": identity,
-            "part1_available": part1, "part2_available": part2,
-            "quality_flags": list(flags),
-        }
-
-    def test_component_means_receive_equal_weight_despite_different_year_counts(self):
-        annual = [self.annual("MSFT", 2016, 10), self.annual("MSFT", 2017, 30),
-                  self.annual("MSFT", 2019, identity=100, part1=False)]
-        original = copy.deepcopy(annual)
-        company = company_scores(annual)[0]
-        self.assertEqual(company["value_alignment"], 20)
-        self.assertEqual(company["identity_coherence"], 100)
-        self.assertEqual(company["authenticity_index"], 60)
-        self.assertEqual(company["score_basis"], "both")
-        self.assertEqual((company["alignment_years"], company["coherence_years"]), (2, 1))
-        self.assertEqual((company["part1_years"], company["part2_years"]), (2, 3))
-        self.assertEqual(annual, original)
-
-    def test_one_component_is_retained_without_halving_and_no_components_stay_missing(self):
-        annual = [self.annual("MSFT", 2016, 20), self.annual("MSFT", 2017, 40),
-                  self.annual("AAPL", 2019, identity=20), self.annual("AAPL", 2020, identity=40),
-                  self.annual("NVDA", 2016, part1=False, part2=False)]
-        companies = {row["ticker"]: row for row in company_scores(annual)}
-        self.assertEqual(len(companies), 3)
-        for ticker, expected, basis in (("MSFT", 30, "alignment_only"),
-                                        ("AAPL", 30, "coherence_only"),
-                                        ("NVDA", None, "unavailable")):
-            with self.subTest(ticker=ticker):
-                self.assertEqual(companies[ticker]["authenticity_index"], expected)
-                self.assertEqual(companies[ticker]["score_basis"], basis)
-
     def test_genuine_zero_is_available(self):
-        company = company_scores([self.annual("MSFT", 2016, 0)])[0]
-        self.assertEqual(company["value_alignment"], 0)
-        self.assertEqual(company["authenticity_index"], 0)
-        self.assertEqual(company["alignment_years"], 1)
-        self.assertEqual(company["score_basis"], "alignment_only")
+        observations = [observation(t, year) for t in list(TICKERS)[:6]
+                        for year in range(2016, 2020)]
+        for row in observations:
+            if row["ticker"] == "MSFT" and row["year"] % 2:
+                row["shares"] = B.copy()
+        rows, _ = score(observations)
+        focal = {row["year"]: row for row in rows if row["ticker"] == "MSFT"}
+        self.assertEqual(focal[2017]["value_alignment"], 0)
+        self.assertIsNone(focal[2017]["authenticity_index"])
+        self.assertEqual(focal[2017]["score_basis"], "alignment_only")
+        complete = focal[2019]
+        self.assertEqual(complete["value_alignment"], 0)
+        self.assertEqual(complete["identity_coherence"], 0)
+        self.assertEqual(complete["authenticity_index"], 0)
+        self.assertEqual(complete["score_basis"], "both")
 
-    def test_partial_source_coverage_does_not_mark_the_whole_company_missing(self):
-        annual = [self.annual("MSFT", 2016, 20, flags=("part2_extraction_warning",)),
-                  self.annual("MSFT", 2017, identity=80, part1=False, flags=("part1_missing",)),
-                  self.annual("AAPL", 2016, part1=False, part2=False)]
-        companies = {row["ticker"]: row for row in company_scores(annual)}
-        self.assertNotIn("part1_missing", companies["MSFT"]["quality_flags"])
-        self.assertIn("part2_extraction_warning", companies["MSFT"]["quality_flags"])
-        self.assertIn("part1_missing", companies["AAPL"]["quality_flags"])
-        self.assertIn("part2_missing", companies["AAPL"]["quality_flags"])
-
-    def test_sensitivity_weights_renormalize_over_available_components(self):
-        annual = [self.annual("MSFT", 2019, 20, 100), self.annual("AAPL", 2019, 20),
-                  self.annual("NVDA", 2019, identity=100)]
-        companies = {row["ticker"]: row for row in company_scores(annual, alignment_weight=0.7)}
-        self.assertAlmostEqual(companies["MSFT"]["authenticity_index"], 44)
-        self.assertEqual(companies["AAPL"]["authenticity_index"], 20)
-        self.assertEqual(companies["NVDA"]["authenticity_index"], 100)
-        zero_weight = company_scores([annual[2]], alignment_weight=1)[0]
-        self.assertIsNone(zero_weight["authenticity_index"])
-        self.assertEqual(zero_weight["score_basis"], "unavailable")
-        for weight in (-0.1, 1.1, float("nan")):
-            with self.subTest(weight=weight), self.assertRaises(ValueError):
-                company_scores(annual, alignment_weight=weight)
+    def test_sensitivity_weights_apply_only_to_complete_composites(self):
+        observations = [observation(t, year) for t in list(TICKERS)[:6]
+                        for year in range(2016, 2020)]
+        for row in observations:
+            if row["ticker"] == "MSFT":
+                row["shares"] = profile(Integrity=0.25, Employees=0.75)
+            elif row["ticker"] == "AAPL" and row["year"] == 2019:
+                row.update(part1_available=False, stated=None)
+        weighted, _ = score(observations, alignment_weight=0.7)
+        by_key = {(row["ticker"], row["year"]): row for row in weighted}
+        self.assertAlmostEqual(by_key["MSFT", 2019]["authenticity_index"], 44)
+        self.assertIsNone(by_key["MSFT", 2016]["authenticity_index"])
+        self.assertIsNone(by_key["AAPL", 2019]["authenticity_index"])
+        endpoint, _ = score(observations, alignment_weight=1)
+        partial = next(row for row in endpoint if row["ticker"] == "AAPL" and row["year"] == 2019)
+        self.assertIsNone(partial["authenticity_index"])
+        self.assertEqual(partial["score_basis"], "coherence_only")
 
 
 class InputTests(unittest.TestCase):

@@ -6,13 +6,14 @@ import json
 from pathlib import Path
 
 from .data import ROOT, load_inputs
-from .index import company_scores, score
+from .index import score
 from .report import write_report
 
 FIELDS = (
-    'ticker', 'company_name', 'sector', 'value_alignment', 'identity_coherence',
-    'authenticity_index', 'score_basis', 'part1_years', 'part2_years',
-    'alignment_years', 'coherence_years', 'quality_flags', 'analyst_notes',
+    'ticker', 'company_name', 'sector', 'year', 'value_alignment', 'identity_coherence',
+    'authenticity_index', 'score_basis', 'identity_change', 'transition_status',
+    'part1_available', 'part2_available', 'stated_theme_count', 'valid_transition_count',
+    'reversal_count', 'quality_flags', 'analyst_notes',
 )
 
 
@@ -20,7 +21,7 @@ def write_dataset(path, rows):
     temporary = path.with_suffix('.csv.tmp')
     try:
         with temporary.open('w', encoding='utf-8', newline='') as handle:
-            writer = csv.DictWriter(handle, fieldnames=FIELDS)
+            writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator='\n')
             writer.writeheader()
             for row in rows:
                 writer.writerow({key: (json.dumps(value, ensure_ascii=False) if isinstance(value, list)
@@ -49,22 +50,20 @@ def main():
             raise ValueError('Output directory must be separate from both source datasets.')
         observations, provenance = load_inputs(args.part1, args.part2)
         annual_rows, metadata = score(observations)
-        rows = company_scores(annual_rows)
         metadata.update(provenance)
         metadata.update({
-            'observation_unit': 'company',
-            'aggregation': 'Average each component over its available years, then average '
-                           'the available component means. Missing values do not enter denominators.',
+            'observation_unit': 'company-year',
+            'aggregation': 'Average alignment and coherence within each company-year only '
+                           'when both exist. Missing components remain missing.',
         })
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        write_dataset(args.output_dir / 'dataset.csv', rows)
-        summary = write_report(observations, annual_rows, rows, metadata, args.output_dir)
+        write_dataset(args.output_dir / 'dataset.csv', annual_rows)
+        write_report(observations, annual_rows, metadata, args.output_dir)
     except (ValueError, OSError) as error:
         parser.exit(1, f'Part 3: {error}\n')
-    counts = summary['eligibility']['available_scores']
-    print(f'Saved {len(rows)} companies to {args.output_dir}')
-    print(f'Alignment: {counts["value_alignment"]}; coherence: {counts["identity_coherence"]}; '
-          f'available-component score: {counts["authenticity_index"]}.')
+    print(f'Saved {len(annual_rows)} company-years to {args.output_dir / "dataset.csv"}')
+    print(f'Two-component authenticity scores: '
+          f'{sum(row["authenticity_index"] is not None for row in annual_rows)}.')
 
 
 if __name__ == '__main__':

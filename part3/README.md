@@ -1,185 +1,116 @@
 # Part 3: Organizational Authenticity Index
 
-Part 3 produces **one score per company for 2016–2024**, using its available
-observations. The two components are averaged separately over time, then combined
-with equal weights. Missing years and missing components are never treated as zero.
+The index combines support for stated values with consistency in disclosed
+priorities. Each observation represents one company-year, capturing variation
+across companies and over time from 2016–2024.
 
-The [dataset](outputs/dataset.csv) retains all 50 companies:
+## Dataset and coverage
 
-| Evidence supporting the score | Companies |
+The [dataset](outputs/dataset.csv) retains all 450 company-years, including gaps.
+
+| Evidence available | Company-years |
 |---|---:|
-| Both component averages | 41 |
-| Alignment average only | 1 |
-| Coherence average only | 7 |
-| Neither component available | 1 |
+| Both components | 153 |
+| Alignment only | 58 |
+| Coherence only | 95 |
+| Neither component | 144 |
 
-This gives **49 available scores**. Apple has alignment evidence but insufficient
-consecutive proxy history for coherence. Broadcom, Intel, Medtronic, McDonald's,
-Starbucks, ConocoPhillips and Valero have coherence evidence without usable
-alignment scores. Target remains blank.
+Only rows with **both components** receive an `authenticity_index`.
+Single-component rows retain **partial evidence**, not comparable authenticity
+estimates. Missing values remain blank; genuine zeros remain zero.
 
-## Averaging rule
+The 153 complete observations span 44 companies. Coverage varies by year:
+20 companies have complete scores in 2019 and 30 in 2024.
 
-```text
-company alignment = average of available annual alignment scores
-company coherence = average of available annual coherence scores
+## Calculations and decisions
 
-both available: company score = (alignment + coherence) / 2
-one available:  company score = that component's average
-none available: company score = blank
-```
+### Value alignment
 
-For example, alignment scores of 50 and 70 average to 60. Coherence scores of
-80, 90 and 100 average to 90. The company score is `(60 + 90) / 2 = 75`.
-This gives each component equal weight despite different numbers of observed
-years. Averaging all five annual values together would instead give coherence
-more weight simply because it has more observations.
-
-The `score_basis` column identifies `both`, `alignment_only`, `coherence_only` or
-`unavailable`. A single-component score remains useful but does not establish
-both dimensions. In particular, a coherence-only score of 100 does not show
-perfect alignment with stated values. Comparisons should use the same score basis.
-
-**Alignment already uses both source datasets.** Part 1 supplies the stated themes;
-Part 2 supplies their disclosure support. Part 1 alone does not contain a numerical
-authenticity score. No substitute score is invented by counting how many values
-a company claims to hold.
-
-## Component calculations
-
-### Value Alignment
-
-For each theme assigned to the company's Part 1 statement in a given year:
+Part 1 identifies stated themes; Part 2 measures their emphasis in proxy statements.
+For each stated theme:
 
 ```text
-benchmark = max(mean theme share among other sector-year companies, 0.005)
-theme support = company theme share / (company theme share + benchmark)
-annual alignment = 100 × average support across stated themes
+benchmark = max(other sector-year companies' mean theme share, 0.005)
+support = company theme share / (company theme share + benchmark)
+alignment = 100 × mean support across stated themes
 ```
 
-Sector-year peers account for differences in proxy composition. Companies receive
-equal weight, the focal company is excluded, and at least five usable peers are
-required. The floor prevents tiny peer shares from producing exaggerated support;
-it binds in 32 of 639 stated-theme comparisons. A score of 50 means peer-average
-support when the floor does not bind. Observed zero support remains zero.
+The focal company is excluded and at least five usable peers are required.
+Sector-year benchmarks account for differences in disclosure composition; the
+floor prevents tiny benchmarks from exaggerating support. Peer-average support
+scores 50 when the floor does not bind. Only stated themes enter the average:
+discussing other priorities is not inherently contradictory. Empty theme lists
+supply no alignment target, and missing statements are not carried forward.
 
-Only stated themes enter the average: discussing other legitimate priorities is
-not inherently contradictory. Overlapping proxy theme shares need not sum to one.
-An assessed empty theme list supplies no alignment target and remains distinct
-from an unavailable assessment. Missing statements are not copied from another year.
-
-There are **172 annual alignment observations across 42 companies**. Their company
-averages use one to nine observed years; `alignment_years` makes that support visible.
-
-### Identity Coherence
+### Identity coherence
 
 Annual change is `1 − cosine similarity` between consecutive ten-theme proxy
-profiles. Cosine compares the relative mix of themes. Missing years and all-zero
-profiles interrupt the history.
+profiles. A substantial move meets the pooled 75th-percentile distance cutoff:
+**0.0760373** across 360 adjacent-year pairs.
 
-A substantial move has distance at least **0.0760373**, the pooled 75th percentile
-of 360 valid adjacent-year distances. Linear quantiles, equality at the cutoff
-and a minimum threshold of 0.00000001 handle ties and completely stable data.
-
-For consecutive profiles A, B and C, a reversal requires two substantial adjacent
-moves and a return toward A:
+For consecutive profiles A, B and C, a reversal requires two substantial moves
+and `distance(A, C) < min(distance(A, B), distance(B, C))`.
 
 ```text
-distance(A, C) < min(distance(A, B), distance(B, C))
-annual coherence = 100 × (1 − reversals / eligible three-year windows)
+coherence = 100 × (1 − reversals / eligible three-year windows)
 ```
 
-Each annual score uses the uninterrupted history ending in that year, with at least
-four consecutive years. A→A→A→A and A→A→B→B score 100; A→B→A→A scores 50;
-A→B→A→B scores 0, provided A and B are substantially different. A lasting change
-is therefore allowed. This specifically measures backtracking, rather than every
-form of instability.
+Each score uses the uninterrupted history ending that year, requiring **four
+consecutive usable years**. Missing years and all-zero profiles reset the history.
+Coherence and the annual composite are therefore unavailable in 2016–2018;
+2019 is the earliest eligible year. Lasting changes are allowed: this component
+measures backtracking, rather than penalizing every shift in priorities.
 
-The company component averages its eligible annual coherence scores. These
-histories overlap, so the observations are not independent and early reversals
-can affect several later scores. There are **248 annual coherence observations
-across 48 companies**; the earliest eligible year is 2019.
+### Annual composite
 
-## Findings and source checks
+```text
+annual index = (annual alignment + annual coherence) / 2
+```
 
-Among the **41 companies with both components**, the average combined score is
-**68.1**. Illustrative company scores are Amazon **87.0**, JPMorgan Chase **51.8**
-and NVIDIA **14.4**. These summarize available period evidence rather than provide
-complete annual histories or a validated ranking of corporate conduct.
+Both components must exist for the same company-year. Equal weights keep the
+dimensions equally influential without claiming an empirically optimal weighting.
+Years with missing components receive no substitute composite.
 
-Coherence reaches 100 for **35 of 48 company averages**, limiting discrimination.
-The seven coherence-only companies average 95.9, illustrating why their scores
-should not be pooled into a ranking with the two-component companies.
-
-Source checks against existing About-page evidence and proxy paragraphs show
-both useful matches and measurement problems:
-
-- **Amazon:** employee commitments correspond to proxy discussions of wages and
-  tuition support. However, repeated human-capital paragraphs and residual
-  shareholder-proposal language can increase measured emphasis.
-- **JPMorgan Chase:** passages discuss conduct training and inclusion, supporting
-  the stated themes. Lower coherence reflects earlier reversals, even where later
-  annual patterns are more consistent.
-- **NVIDIA:** alternating stock-plan appendices add a different mix of matched
-  themes. Possible compensation criteria and a director's Environmental Engineering
-  title show how keyword matches can produce apparent priorities and reversals.
-
-These were targeted checks, not independent validation of all theme labels.
-
-## Sensitivity and limitations
-
-Sensitivity analysis varies component weights
-(70/30 and 30/70), the change percentile (60th and 90th), and the benchmark floor
-(0.001 and 0.01). It also excludes extraction warnings and recomputes annual
-peer benchmarks, histories and company averages.
-
-Comparisons use companies available under both scenarios **with the same score
-basis**. Rank correlations use only companies with both components in both
-scenarios. Lost coverage and changes in basis are reported separately. For a
-single-component company, changing the relative component weights does not change
-its score: the available weight is normalized to one.
-
-Changing the benchmark floor moves company scores by only 0.12–0.18 points on
-average. Changing the reversal percentile moves them by 1.69–2.00 points on
-average, with individual changes as large as 26.55 points. Excluding extraction
-warnings leaves 44 scored companies: five lose their scores and three change basis.
-Among the 41 remaining companies with unchanged basis, the average absolute change
-is 0.66 points.
-
-The index measures consistency in corporate communication, not verified conduct.
-Sparse statement coverage, changing declaration scope, proxy composition and
-context-insensitive matches limit interpretation. A one-year alignment average
-has less supporting evidence than a multi-year average, even when their numbers
-are similar.
-
-The component averages can also cover different sets of years. The full-period
-summary is retrospective: calibration uses the full study period, and in 184 of
-204 jointly available annual observations the About-page capture follows the
-proxy filing. These scores should not be treated as information available at the
-start of the period or used predictively without past-only recalculation.
-
-Further work should standardize comparable proxy sections, remove residual proposal
-and duplicate text, and validate thematic matches before making stronger claims.
-
-## Dataset and reproduction
+## Columns
 
 | Column | Meaning |
 |---|---|
 | `ticker`, `company_name`, `sector` | Fixed company identity |
-| `value_alignment` | Mean available annual alignment, 0–100 |
-| `identity_coherence` | Mean available annual coherence, 0–100 |
-| `authenticity_index` | Average of available component means, 0–100 |
-| `score_basis` | Both components, alignment only, coherence only, or unavailable |
-| `part1_years` | Years with completed Part 1 assessments, including assessed empty themes |
-| `part2_years` | Years with usable proxy theme measures |
-| `alignment_years` | Annual scores entering the alignment average |
-| `coherence_years` | Annual scores entering the coherence average |
-| `quality_flags` | JSON list of source, timing and company-level evidence limitations |
-| `analyst_notes` | Coverage and explanation of partial or unavailable scores |
+| `year` | Observation year, 2016–2024 |
+| `value_alignment`, `identity_coherence` | Annual component scores; 0–100 |
+| `authenticity_index` | Equal-weight composite; blank unless both components exist |
+| `score_basis` | `both`, `alignment_only`, `coherence_only`, or `unavailable` |
+| `quality_flags`, `analyst_notes` | JSON list of source/timing/coverage limitations and their explanation |
+| `identity_change` | Cosine distance from the immediately preceding proxy profile; 0–1 |
+| `transition_status` | Latest pattern: stable, reversal, sustained transition, provisional change, or insufficient history |
+| `part1_available`, `part2_available` | Completed statement assessment and usable proxy measures, respectively; 1/0 |
+| `stated_theme_count` | Number of assessed stated themes; blank if unassessed |
+| `valid_transition_count` | Adjacent transitions in the uninterrupted proxy history |
+| `reversal_count` | Reversals in that history; blank before coherence is eligible |
 
-The [code](../src/part3/) uses existing dependencies and makes no network or model
-requests. It calculates scores from the Part 1 and Part 2 CSVs without modifying
-them. Rerunning uses the current inputs, so improved source coverage can change scores.
+## Findings and limitations
+
+Coherence equals 100 in **195 of 248 eligible company-years**, limiting discrimination.
+A score of 100 means no qualifying reversals were detected, not proven authenticity.
+
+Sensitivity checks vary weights (70/30 and 30/70), change cutoffs (60th and 90th
+percentiles), and benchmark floors (0.001 and 0.01), and exclude extraction
+warnings. Comparisons match the same company-years with both components in
+both scenarios; lost coverage is counted separately. Changing coverage means
+yearly distributions need not represent the same companies.
+
+Sparse statements, changing page scope, duplicated proxy text and context-insensitive
+keyword matches limit interpretation. Targeted checks found stock-plan appendices
+affecting NVIDIA's theme mix; its low score is not evidence of poor conduct.
+Comparable proxy sections and broader manual validation would improve the measure.
+Histories overlap, calibration uses the full period, and About captures can follow
+proxy filings. Scores describe communication retrospectively; they do not establish
+conduct or causality.
+
+## Reproduction
+
+The [code](../src/part3/) reads the current Part 1 and Part 2 CSVs without modifying
+them or making network/model requests. Improved coverage can change scores.
 
 ```sh
 uv sync

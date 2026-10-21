@@ -10,7 +10,7 @@ from statistics import correlation, mean, median, stdev
 
 
 SCORES = ('value_alignment', 'identity_coherence', 'authenticity_index')
-LABELS = ('Value Alignment', 'Identity Coherence', 'Organizational Authenticity Index')
+LABELS = ('Value Alignment', 'Identity Coherence', 'Authenticity Index (both components)')
 
 
 def _stats(values):
@@ -33,7 +33,7 @@ def _groups(rows, field):
 
 
 def _ranks(values):
-    """Average tied ranks; ranks compare companies on the common sample."""
+    """Average tied ranks on the common company-year sample."""
     ranked = [0.0] * len(values)
     order = sorted(range(len(values)), key=values.__getitem__)
     start = 0
@@ -54,7 +54,7 @@ def _rank_correlation(left, right):
 
 
 def _sensitivity(observations, baseline, metadata):
-    from src.part3.index import company_scores, score
+    from src.part3.index import score
 
     settings = metadata['settings']
     defaults = {'alignment_weight': settings['alignment_weight'],
@@ -67,19 +67,18 @@ def _sensitivity(observations, baseline, metadata):
                  ('benchmark_floor_001', {'baseline_floor': .001}),
                  ('benchmark_floor_010', {'baseline_floor': .01}),
                  ('exclude_extraction_warnings', {'exclude_warnings': True})]
-    original = {row['ticker']: row for row in baseline if row['authenticity_index'] is not None}
+    original = {(row['ticker'], row['year']): row for row in baseline
+                if row['authenticity_index'] is not None}
     result = []
     for name, changed in scenarios:
         parameters = defaults | changed
         if changed:
-            annual, details = score(observations, **parameters)
-            rows = company_scores(annual, alignment_weight=parameters['alignment_weight'])
+            rows, details = score(observations, **parameters)
         else:
             rows, details = baseline, metadata
-        scores = {row['ticker']: row for row in rows if row['authenticity_index'] is not None}
-        common = original.keys() & scores.keys()
-        keys = sorted(key for key in common if original[key]['score_basis'] == scores[key]['score_basis'])
-        ranked = [key for key in keys if original[key]['score_basis'] == 'both']
+        scores = {(row['ticker'], row['year']): row for row in rows
+                  if row['authenticity_index'] is not None}
+        keys = sorted(original.keys() & scores.keys())
         left = [original[key]['authenticity_index'] for key in keys]
         right = [scores[key]['authenticity_index'] for key in keys]
         differences = [abs(a - b) for a, b in zip(left, right)]
@@ -89,20 +88,16 @@ def _sensitivity(observations, baseline, metadata):
                        'benchmark_floor': parameters['baseline_floor'],
                        'exclude_extraction_warnings': parameters['exclude_warnings'],
                        'change_threshold': details['change_threshold'],
-                       'available_companies': len(scores), 'common_same_basis_companies': len(keys),
-                       'basis_changed_companies': sum(original[key]['score_basis'] != scores[key]['score_basis']
-                                                      for key in common),
-                       'lost_companies': len(original.keys() - scores.keys()),
-                       'gained_companies': len(scores.keys() - original.keys()),
+                       'available_company_years': len(scores), 'common_company_years': len(keys),
+                       'lost_company_years': len(original.keys() - scores.keys()),
+                       'gained_company_years': len(scores.keys() - original.keys()),
                        'coverage_change_from_baseline': len(scores) - len(original),
                        'common_baseline_mean': mean(left) if left else None,
                        'common_scenario_mean': mean(right) if right else None,
                        'mean_absolute_change': mean(differences) if differences else None,
                        'max_absolute_change': max(differences) if differences else None,
-                       'ranked_both_component_companies': len(ranked),
                        'spearman_rank_correlation': _rank_correlation(
-                           [original[key]['authenticity_index'] for key in ranked],
-                           [scores[key]['authenticity_index'] for key in ranked])})
+                           left, right)})
     return result
 
 
@@ -115,6 +110,7 @@ def _annual_eligibility(rows):
     blockers = {'value_alignment': alignment_reasons, 'identity_coherence': coherence_reasons,
                 'authenticity_index': alignment_reasons | coherence_reasons}
     return {'expected_rows': len(rows),
+            'expected_companies': len({row['ticker'] for row in rows}),
             'part1_available': sum(bool(row['part1_available']) for row in rows),
             'part2_available': sum(bool(row['part2_available']) for row in rows),
             'both_parts_available': sum(bool(row['part1_available'] and row['part2_available'])
@@ -124,7 +120,10 @@ def _annual_eligibility(rows):
                                                        and row['part1_available'] and row['part2_available']
                                                        for row in rows),
             'available_scores': {key: sum(row[key] is not None for row in rows) for key in SCORES},
+            'companies_with_scores': {key: len({row['ticker'] for row in rows if row[key] is not None})
+                                     for key in SCORES},
             'missing_scores': {key: sum(row[key] is None for row in rows) for key in SCORES},
+            'score_basis_counts': dict(sorted(Counter(row['score_basis'] for row in rows).items())),
             'quality_flag_counts': dict(sorted(flags.items())),
             'missing_score_reasons': {
                 key: dict(sorted(Counter(flag for row in rows if row[key] is None
@@ -153,33 +152,24 @@ def _benchmark_diagnostics(observations, rows, floor):
             'floor_binding_fraction': floored / len(benchmarks) if benchmarks else None}
 
 
-def _review_cases(observations, annual_rows, company_rows):
-    """Inspect comparable company scores through their annual alignment evidence."""
+def _review_cases(observations, rows):
+    """Select annual score extremes with the corresponding source evidence."""
     lookup = {(obs['ticker'], obs['year']): obs for obs in observations}
-    available = [row for row in company_rows if row['score_basis'] == 'both']
+    available = [row for row in rows if row['authenticity_index'] is not None]
     selected, used = [], set()
     for label, reverse in (('low', False), ('high', True)):
-        ordered = sorted(available, key=lambda r: (r['authenticity_index'], r['ticker']),
+        ordered = sorted(available, key=lambda r: (r['authenticity_index'], r['ticker'], r['year']),
                          reverse=reverse)
         sectors = set()
         for row in ordered:
             key = row['ticker']
             if key in used or row['sector'] in sectors:
                 continue
-            aligned = sorted([annual for annual in annual_rows if annual['ticker'] == key
-                              and annual['value_alignment'] is not None],
-                             key=lambda annual: (annual['value_alignment'], annual['year']))
-            evidence = []
-            for annual in dict.fromkeys((aligned[0]['year'], aligned[-1]['year'])):
-                obs = lookup[key, annual]
-                scored = next(item for item in aligned if item['year'] == annual)
-                evidence.append({'year': annual, 'value_alignment': scored['value_alignment'],
-                                 'stated_themes': list(obs['stated']), 'disclosure_shares': obs['shares'],
-                                 'quality_flags': scored['quality_flags'],
-                                 'part1_snapshot_url': obs['part1'].get('snapshot_url', ''),
-                                 'part2_source_url': obs['part2'].get('source_url', ''),
-                                 'part2_text_file': obs['part2'].get('text_file', '')})
-            selected.append({'selection': label, **row, 'annual_alignment_evidence': evidence})
+            obs = lookup[key, row['year']]
+            selected.append({'selection': label, **row,
+                             'stated_themes': list(obs['stated']), 'disclosure_shares': obs['shares'],
+                             'part1_snapshot_url': obs['part1'].get('snapshot_url', ''),
+                             'part2_source_url': obs['part2'].get('source_url', '')})
             used.add(key)
             sectors.add(row['sector'])
             if len(sectors) == 3:
@@ -209,16 +199,8 @@ def _plots(observations, rows, selected, output_dir):
     fig, axes = plt.subplots(1, 3, figsize=(12, 3.6), sharex=True)
     for ax, score, label in zip(axes, SCORES, LABELS):
         values = [row[score] for row in rows if row[score] is not None]
-        if score == 'authenticity_index':
-            groups = [[row[score] for row in rows if row['score_basis'] == basis]
-                      for basis in ('both', 'alignment_only', 'coherence_only')]
-            ax.hist(groups, bins=list(range(0, 101, 10)), stacked=True, edgecolor='white',
-                    color=['#385d86', '#dc9147', '#78a283'],
-                    label=['Both components', 'Alignment only', 'Coherence only'])
-            ax.legend(frameon=False, fontsize=8, loc='upper left')
-        else:
-            ax.hist(values, bins=list(range(0, 101, 10)), color='#385d86', edgecolor='white')
-        ax.set(title=f'{label}\n(n = {len(values)})', xlim=(0, 100), xlabel='Score', ylabel='Companies')
+        ax.hist(values, bins=list(range(0, 101, 10)), color='#385d86', edgecolor='white')
+        ax.set(title=f'{label}\n(n = {len(values)})', xlim=(0, 100), xlabel='Score', ylabel='Company-years')
     fig.tight_layout()
     fig.savefig(output_dir / 'distributions.svg', metadata={'Date': None})
     plt.close(fig)
@@ -258,46 +240,32 @@ def _ceiling(rows):
             for score in SCORES}
 
 
-def write_report(observations, annual_rows, company_rows, metadata, output_dir):
-    """Summarize full-period company scores; retain annual evidence as diagnostics."""
+def write_report(observations, annual_rows, metadata, output_dir):
+    """Summarize annual scores, coverage and sensitivity on comparable observations."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    sensitivity = _sensitivity(observations, company_rows, metadata)
+    sensitivity = _sensitivity(observations, annual_rows, metadata)
     with (output_dir / 'sensitivity.csv').open('w', encoding='utf-8', newline='') as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(sensitivity[0]))
+        writer = csv.DictWriter(stream, fieldnames=list(sensitivity[0]), lineterminator='\n')
         writer.writeheader()
         writer.writerows(sensitivity)
     selected = _trajectory_selection(annual_rows)
-    _plots(observations, company_rows, selected, output_dir)
-    basis_counts = dict(Counter(row['score_basis'] for row in company_rows))
+    _plots(observations, annual_rows, selected, output_dir)
     summary = {'metadata': metadata,
-               'eligibility': {
-                   'expected_companies': len(company_rows),
-                   'available_scores': {key: sum(row[key] is not None for row in company_rows) for key in SCORES},
-                   'score_basis_counts': {basis: basis_counts.get(basis, 0)
-                                          for basis in ('both', 'alignment_only', 'coherence_only', 'unavailable')},
-                   'years_per_component': {key: _stats(row[key] for row in company_rows)
-                                           for key in ('part1_years', 'part2_years', 'alignment_years', 'coherence_years')},
-                   'unavailable': [{'ticker': row['ticker'], 'reason': row['analyst_notes']}
-                                   for row in company_rows if row['authenticity_index'] is None]},
-               'overall': _score_stats(company_rows), 'by_sector': _groups(company_rows, 'sector'),
-               'by_score_basis': _groups(company_rows, 'score_basis'),
-               'sector_by_score_basis': [{'sector': sector, 'by_score_basis': _groups(
-                   [row for row in company_rows if row['sector'] == sector], 'score_basis')}
-                   for sector in sorted({row['sector'] for row in company_rows})],
-               'ceiling_diagnostics': _ceiling(company_rows),
-               'annual_diagnostics': {
-                   'eligibility': _annual_eligibility(annual_rows),
-                   'transition_counts': dict(sorted(Counter(row['transition_status'] for row in annual_rows).items())),
-                   'ceiling_diagnostics': _ceiling(annual_rows),
-                   'benchmark_diagnostics': _benchmark_diagnostics(observations, annual_rows, metadata['settings']['baseline_floor'])},
+               'eligibility': _annual_eligibility(annual_rows),
+               'overall': _score_stats(annual_rows),
+               'by_year': _groups(annual_rows, 'year'), 'by_sector': _groups(annual_rows, 'sector'),
+               'by_score_basis': _groups(annual_rows, 'score_basis'),
+               'ceiling_diagnostics': _ceiling(annual_rows),
+               'transition_counts': dict(sorted(Counter(row['transition_status'] for row in annual_rows).items())),
+               'benchmark_diagnostics': _benchmark_diagnostics(observations, annual_rows, metadata['settings']['baseline_floor']),
                'sensitivity': sensitivity, 'selected_trajectories': selected,
                'trajectory_selection': 'One observed company per available pattern; longest current history, then ticker and year. Three most variable theme shares are plotted. Gaps break lines; vertical scales vary by company.',
-               'case_review': _review_cases(observations, annual_rows, company_rows),
-               'case_selection': 'Three highest and three lowest company scores with both components, selecting different sectors within each group. Annual alignment extremes provide source links. These are review candidates, not independent validation.',
+               'case_review': _review_cases(observations, annual_rows),
+               'case_selection': 'Three highest and three lowest annual indices, selecting different companies and sectors within each group. Source links refer to the selected company-year. These are review candidates, not independent validation.',
                'interpretation': 'Descriptive consistency of corporate communication and disclosure; no causal or verified-conduct claims.',
-               'company_comparison': 'Company components average their own available years. Scores using one component are reported separately from scores using both; component coverage periods can differ.',
-               'rank_comparison': 'Tie-aware Spearman correlation uses companies with both components in both scenarios; undefined for constant scores. Absolute score changes use all common companies whose component basis is unchanged.'}
+               'annual_comparison': 'Annual indices require both components in the same company-year. Coherence requires four consecutive usable years; missing components remain missing.',
+               'rank_comparison': 'Tie-aware Spearman correlation and absolute score changes use matched company-years with both components in both scenarios; correlation is undefined for constant scores.'}
     temporary = output_dir / '.summary.json.tmp'
     temporary.write_text(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + '\n',
                          encoding='utf-8')
