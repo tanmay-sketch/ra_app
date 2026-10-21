@@ -1,48 +1,111 @@
 # Part 4: Disclosure Profiles
 
-## Research question and contribution
+## Research question and findings
 
-**Do firms exhibit recurring patterns of disclosed priorities, and do they move between these patterns over time?** Rather than assume that one sector or one authenticity score defines corporate identity, this exploratory analysis clusters the *relative mix* of themes appearing in annual proxy statements. It then examines cluster composition, transitions, and descriptive differences in the Part 3 index.
+**Do companies show different patterns in the priorities they discuss, and do these patterns change over time?**
 
-The key finding is methodological: one apparently distinct cluster largely exposes **ambiguous theme matching**, not a validated organizational type. This is useful evidence about the measurement pipeline and the limits of inferring corporate values from disclosure language.
+This part uses clustering to group companies based on the themes emphasized in their annual proxy statements. Rather than assuming that companies in the same sector have similar priorities, the analysis looks for patterns directly in their disclosure language.
 
-## Method and research choices
+The analysis also examines whether companies move between groups over time and how these groups compare on the Part 3 Authenticity Index.
 
-The input comprises **421 usable company-years from 49 companies**, 2016-2024. Each observation is a ten-theme vector of Part 2 proxy paragraph shares: Integrity, Innovation, Quality, Safety, Customers, Employees, Inclusion, Environment, Community, and Shareholders. The vector is divided by its Euclidean norm before clustering. This emphasizes the *relative mix* of matched themes, not the total share of a document discussing them. Theme shares can overlap because one paragraph may match several themes. The ten columns are not individually standardized, avoiding automatic amplification of rare categories.
+The most interesting finding is that **one cluster appears to reflect problems with how themes are identified, rather than a genuinely distinct organizational profile**. This highlights why statistical patterns need to be checked against their original source documents.
 
-K-means is estimated for **2-5 clusters** using Euclidean distance, seeds 0-9 per candidate, and 20 initializations per seed. The lowest-inertia fit represents each candidate; its average silhouette across observations selects the number of clusters, with ties favoring fewer clusters. One pooled partition covers all years. Company, sector, year, tone, and authenticity are **not fitting features**. Cluster identifiers are ordered by decreasing size and imply neither quality nor authenticity.
+## Methodology
+
+The analysis uses **421 company-year observations from 49 companies**, covering 2016–2024.
+
+Each proxy statement is represented by the same ten themes used in Parts 1 and 2: Integrity, Innovation, Quality, Safety, Customers, Employees, Inclusion, Environment, Community, and Shareholders.
+
+The theme shares are normalized so that clustering focuses on the **relative importance of different themes**, rather than the overall amount of theme-related text. A paragraph can contribute to multiple categories, so the original shares do not necessarily add up to 100%. Individual themes are not separately standardized, avoiding excessive influence from rarely detected categories.
+
+I used **K-means clustering**, which groups observations with similar patterns.
+
+I tested solutions containing two to five clusters and compared them using the *silhouette score*. This measures how well observations fit within their assigned groups compared with other groups. Higher values generally indicate clearer separation.
+
+The clustering was repeated from different starting points to check whether the results were consistent. Company names, sectors, years, tone scores, and authenticity scores were not used to create the groups. They were considered afterward to help interpret the results.
 
 ## Preliminary findings
 
-Five clusters achieve the highest silhouette (**0.234**), but separation is modest: two, three, and four clusters score 0.227, 0.223, and 0.222, respectively. Twelve observations have negative individual silhouettes. The small improvement over four clusters does not establish five genuine corporate archetypes.
+The five-cluster solution achieved the highest silhouette score of **0.234**, although the difference from alternatives was small. The scores for two, three, and four clusters were 0.227, 0.223, and 0.222, respectively.
 
-| Cluster | Dominant matched emphasis | Company-years | Complete Part 3 scores | Median index |
+This suggests that some patterns exist, but the groups are not sharply separated. Twelve observations also fit another cluster better than their assigned one. The five clusters should therefore be treated as exploratory profiles rather than established organizational types.
+
+| Cluster | Main themes | Company-years | Available index scores | Median index |
 |---|---|---:|---:|---:|
 | C1 | Shareholders | 139 | 37 | 63.4 |
 | C2 | Employees and Inclusion | 124 | 50 | 72.6 |
-| C3 | Environment, with Shareholders and Safety | 75 | 34 | 69.3 |
-| C4 | Innovation and Customers, with Shareholders | 74 | 26 | 72.2 |
+| C3 | Environment, Shareholders and Safety | 75 | 34 | 69.3 |
+| C4 | Innovation, Customers and Shareholders | 74 | 26 | 72.2 |
 | C5 | Community and Inclusion matches | 9 | 6 | 57.2 |
 
-![Mean normalized theme weights across disclosure clusters](outputs/profiles.png)
+![Mean normalized theme weights across the five disclosure clusters](outputs/profiles.png)
 
-The figure reports **mean normalized weights**, not shares of all proxy words or probabilities. C3 is substantially associated with Energy: 56 of its 75 observations come from that sector. Yet the adjusted Rand agreement between clusters and sector labels is only **0.144**, so clusters do not simply reproduce the sector classification.
+The figure shows the average relative emphasis of each theme within a cluster. Darker cells indicate greater emphasis, not the percentage of the entire document devoted to that theme.
 
-**C5 contains all nine Berkshire Hathaway observations and no other companies.** Examination of its 2016 and 2024 proxy passages shows why caution is necessary. Some Inclusion matches refer to *including shareholder proposals in a proxy statement* or to a committee that *does not seek diversity* in director selection. Community matches often reflect directors' charitable-foundation biographies. These terms occur in source text, but the passages do not establish affirmative corporate commitments. Reproducing the theme shares does not resolve the underlying semantic error. Here, clustering makes a weakness of Part 2's matching method visible.
+### What the clusters reveal
 
-Companies change cluster in **96 of 360** valid adjacent-year comparisons (26.7%), across 40 companies; gaps are never bridged. The Part 3 medians above use only 153 complete company-year scores and are descriptive. Theme shares also enter Part 3's alignment component, so such comparisons cannot independently validate the index.
+**Sector differences:** C3 is strongly associated with Energy companies, which account for 56 of its 75 observations. However, overall agreement between clusters and sector classifications is relatively low (adjusted Rand index = 0.144). This suggests that sector membership alone does not explain the observed patterns.
 
-## Stability, limitations, and next steps
+**Changes over time:** Companies switched clusters in **96 of 360 valid consecutive-year comparisons (26.7%)**, involving 40 companies. Missing years were not treated as transitions. These changes suggest that disclosure profiles can shift, although a cluster switch does not necessarily reflect a change in company behavior.
 
-Comparing each seed's partition with the lowest-inertia reference gives mean adjusted Rand agreement **0.930** (minimum 0.869). Four clusters are more initialization-stable (mean 0.999). Removing 51 filings whose Part 2 notes flag extraction review and refitting the selected five clusters gives **0.954** agreement on the 370 retained observations. These checks support computational stability, **not** the substantive reality of the groups.
+**Connection to authenticity:** The clusters have different median Authenticity Index scores, but these comparisons are descriptive. Only 153 company-year observations have complete Part 3 scores, and the same theme measures contribute to both analyses. Differences between clusters therefore cannot independently validate the index.
 
-Phrase matching does not consistently distinguish endorsement from negation, procedural text from substantive priorities, or biographies from company actions. Section templates, duplicate wording, and regulations shape the features. The 421 observations are repeated filings from only 49 companies, not independent organizations, and K-means partitions even weakly separated data. The practical next step is passage-level validation and extraction from comparable proxy sections, followed by features that distinguish concrete actions, targets, and outcomes from aspirational or procedural language.
+### An important finding: Berkshire Hathaway
 
-## Output schema and reproduction
+**Cluster C5 consists entirely of Berkshire Hathaway's nine annual proxy statements.**
 
-[`outputs/dataset.csv`](outputs/dataset.csv) retains all 450 company-years; 29 lack usable profiles and have blank clusters. Fitting requires a nonzero theme profile and a text reference; a missing Part 3 score does not prevent clustering. `ticker`, `company_name`, `sector`, `year` identify observations; `theme_shares` holds the original JSON features; `cluster`, `cluster_silhouette`, and `cluster_changed_from_prior` describe assignments and adjacent-year transitions; `authenticity_index` and `score_basis` carry Part 3 information solely for post-fit comparison; and `quality_flags` identifies missing, all-zero, or extraction-warning profiles. Blank numeric values are not zeros.
+Initially, this might suggest that Berkshire Hathaway has a particularly distinctive combination of Community and Inclusion priorities.
 
-The pipeline in [`src/part4/`](../src/part4/) reuses Parts 2 and 3 without network or LLM requests. Saved results use scikit-learn 1.9.1.
+However, reviewing its 2016 and 2024 proxy statements revealed a different explanation.
+
+Some Inclusion matches refer to including shareholder proposals in a proxy statement or describe a committee that does not seek diversity when selecting directors. Community matches frequently concern directors' charitable-foundation backgrounds.
+
+Although these passages contain words matched to the categories, they do not necessarily demonstrate company commitments to Inclusion or Community.
+
+This is an important limitation of the text-mining approach in Part 2. **A statistically distinct cluster may result from misleading keyword matches or document structure rather than meaningful differences in corporate priorities.**
+
+The clustering analysis therefore provides a useful way to identify potential problems in the underlying measurement process.
+
+## Reliability checks and limitations
+
+I checked whether the results were sensitive to different starting points and data-quality issues.
+
+- Repeated clustering runs showed strong agreement (average adjusted Rand index of **0.930**), although four clusters were even more consistent (**0.999**).
+- Excluding 51 filings with extraction warnings and repeating the five-cluster analysis produced similar groupings (**0.954** agreement on the 370 retained observations).
+
+These results suggest that the clustering is reasonably stable, but **stability does not prove that the groups represent real organizational differences**.
+
+The main limitations concern how priorities are measured. Keyword matching cannot always distinguish company commitments from procedural language, negative statements, or information about individual directors. Proxy templates and repeated sections can also influence theme shares.
+
+Additionally, the 421 observations represent repeated filings from 49 companies, not 421 independent organizations. K-means will also create groups even when the underlying patterns are weak.
+
+### Realistic improvements
+
+With additional time, I would focus on three improvements:
+
+1. **Review a small sample of questionable passages**, especially those responsible for unusual cluster assignments such as Berkshire Hathaway's.
+2. **Refine ambiguous theme-matching rules** and check whether correcting these matches changes the affected cluster assignments.
+3. **Compare similar sections of proxy statements** for a smaller group of companies to reduce differences caused by document structure.
+
+These checks would help establish whether the identified patterns reflect meaningful disclosure priorities rather than artifacts of text processing.
+
+## Dataset and reproduction
+
+The [output dataset](outputs/dataset.csv) retains all **450 company-year observations**, including 29 without usable disclosure profiles. Missing observations are not assigned to clusters.
+
+| Columns | Description |
+|---|---|
+| `ticker`, `company_name`, `sector`, `year` | Company and year identifiers |
+| `theme_shares` | Ten theme measures from Part 2 |
+| `cluster` | Assigned disclosure group (1–5) |
+| `cluster_silhouette` | How well an observation fits its assigned cluster |
+| `cluster_changed_from_prior` | Whether the cluster changed from the previous year |
+| `authenticity_index`, `score_basis` | Part 3 scores and available evidence, used only for comparison |
+| `quality_flags` | Missing data and extraction-quality concerns |
+
+Missing numerical values remain blank rather than being treated as zero.
+
+The [implementation](../src/part4/) uses the existing Part 2 and Part 3 datasets without additional API or LLM requests. The saved results use scikit-learn 1.9.1.
 
 ```sh
 uv sync
