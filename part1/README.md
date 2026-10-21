@@ -2,32 +2,38 @@
 
 ## Scope and findings
 
-Part 1 examines how companies publicly describe their organizational values over time. I collected archived English-language About Us, mission, values, and equivalent pages for the supplied 50 companies across 2016–2024.
+Part 1 examines how companies publicly describe their organizational values through archived English-language About Us, mission, values, and equivalent pages from 2016–2024. Company identities and sector labels follow the fixed [50-company roster](../src/tickers.py).
 
-The [dataset](outputs/dataset.csv) contains **220 usable company-years out of 450 (48.9%)**, covering 45 companies. Six companies have complete nine-year histories. Coverage increases from 14 companies in 2016 to 38 in 2024, indicating substantially better recovery of recent pages.
+The [dataset](outputs/dataset.csv) contains **269 usable company-years out of 450 (59.8%)**, covering all 50 companies. Ten companies have complete nine-year histories. Coverage increases from 18 companies in 2016 to 44 in 2024, indicating substantially better recovery of recent pages.
 
 | Sector | Usable / Expected | Coverage |
 |---|---:|---:|
-| Healthcare | 52 / 90 | 57.8% |
+| Healthcare | 61 / 90 | 67.8% |
 | Financials | 48 / 90 | 53.3% |
-| Technology | 46 / 90 | 51.1% |
+| Technology | 69 / 90 | 76.7% |
 | Consumer Discretionary | 43 / 90 | 47.8% |
-| Energy | 31 / 90 | 34.4% |
-| **Total** | **220 / 450** | **48.9%** |
+| Energy | 48 / 90 | 53.3% |
+| **Total** | **269 / 450** | **59.8%** |
 
-Among **171 comparable adjacent-year pairs**, 106 (62.0%) differ in wording and 65 (38.0%) are identical.
+Among **207 comparable adjacent-year pairs**, 140 (67.6%) differ in wording and 67 (32.4%) are identical.
 
-Across the 220 usable pages, the most frequently identified themes are Innovation (117 pages), Community (103), and Employees (101). Environment appears in 46 pages and Inclusion in 66. These are frequencies among successfully collected pages, not representative estimates for the entire roster. Missingness and differences in page content limit interpretation.
+Across the 269 usable pages, the most frequently identified themes are Innovation (147 pages), Community (119), and Employees (110). Environment appears in 51 pages and Inclusion in 79. These are frequencies among successfully collected pages, not representative estimates for the entire roster. Missingness and differences in page content limit interpretation.
 
 The results establish an initial longitudinal dataset of stated values, but uneven coverage limits conclusions about sector-wide trends or shifts across the full 2016–2024 period.
+
+A targeted headless recovery run for Salesforce and the five previously empty companies added **49 observations**, retaining all 220 previously collected texts and their source URLs. The rest of the dataset retains earlier collection results. Remaining gaps have not been exhaustively searched.
 
 ## Research decisions and methodology
 
 ### Page discovery and archival collection
 
-The [Wayback Machine CDX API](https://web.archive.org/cdx/search/cdx) was used to retrieve historical corporate pages. Official-domain searches, reviewed historical links, and homepage references generate up to three candidate URLs per company. An LLM selects a company-wide About Us, mission, values, or principles page, prioritizing historical coverage and excluding product, news, support, and recruitment-only pages.
+The [Wayback Machine CDX API](https://web.archive.org/cdx/search/cdx) locates historical captures, keeping HTTP 200 HTML records and at most one indexed capture per month. A headless Chromium browser reads official homepage navigation, including links added by JavaScript. These links are ranked alongside reviewed historical sources. Static homepage retrieval and optional official-domain search provide fallbacks. Corporate overview, mission, and values pages take priority over reports, locations, and product pages.
 
-For each selected URL, the pipeline searches for annual captures, prioritizing the snapshot nearest July 1, followed by distinct earliest and latest captures. At most three captures are attempted per year, with one browser replay where necessary.
+Up to three candidate URLs are indexed initially. If years remain uncovered, at most two archived homepages are inspected for historical paths, with up to three observed candidates checked from each. An LLM selects the preferred About page and any eligible alternatives. Previously successful URLs remain useful evidence but do not prevent discovery of pages used in other years.
+
+For each year, captures nearest July 1 are tried first across the eligible URLs. Distinct earliest and latest captures are tried if the remaining budget allows. All eligible URLs share a limit of **three total capture attempts per company-year in each collection run**. Each selected capture can use headless replay when static extraction fails. The browser waits for substantive body text and follows archived redirects; a navigation bar or loading screen does not count as a successful scrape.
+
+Browser sessions run headlessly and separately from the normal browser window, allowing collection to continue while the laptop is in use.
 
 The July midpoint provides a consistent annual reference, while bounded retries make collection feasible across 450 observations. However, these limits may exclude recoverable historical material.
 
@@ -35,15 +41,15 @@ The July midpoint provides a consistent annual reference, while bounded retries 
 
 Archived pages present several complications: URL migrations, corporate rebranding, JavaScript-dependent content, redirect chains, and incomplete Wayback captures.
 
-Redirects are followed for up to five hops and accepted only when they resolve to an appropriate corporate or reviewed rebrand host within the target year. Live pages, archive errors, and captures containing only navigation or statistics are rejected.
+Captures are accepted only when redirects resolve to an appropriate corporate or reviewed rebrand host within the target year; chains exceeding five hops are rejected. Browser request guards and final response checks reject live or out-of-year corporate document, script, and data content. Failed ancillary requests are audited without automatically rejecting usable corporate text. Archive donation banners, preview services, redirect screens, corporate errors, and captures containing only navigation or statistics are rejected.
 
-Trafilatura (python library) extracts substantive body text, with a main-content fallback. At least 25 substantive words are required. Accepted observations are preserved across reruns unless a quality problem is identified.
+Trafilatura extracts substantive body text, with a main-content fallback. Navigation, footers, archive overlays, and identifiable social-feed widgets are removed. At least 25 substantive words are required. Accepted observations are preserved across reruns unless a quality problem is identified.
 
 These rules prioritize reliable source attribution over maximizing the number of accepted pages.
 
 ### Theme classification and wording changes
 
-I use `gpt-4o-mini-2024-07-18` to identify ten categories, consistent with the conceptual framework used in Part 2:
+Classification uses `gpt-4o-mini-2024-07-18` to identify ten categories, consistent with the conceptual framework used in Part 2:
 
 | Theme | Organizational commitment |
 |---|---|
@@ -60,7 +66,7 @@ I use `gpt-4o-mini-2024-07-18` to identify ten categories, consistent with the c
 
 Contextual LLM classification accommodates paraphrases and distinguishes explicit commitments from incidental references. Supporting source lines are retained in the local audit for review.
 
-Adjacent-year comparisons require usable text from consecutive years and the same selected source page. After whitespace normalization:
+Adjacent-year comparisons require usable text from consecutive years and the same normalized source URL. HTTP/HTTPS, www, trailing slashes, and default filenames are treated as equivalent. Both comparison fields remain blank when the prior year is missing or the source page changes. After whitespace normalization:
 
 ```text
 changed_from_prior =
@@ -83,35 +89,34 @@ The change flag identifies any wording difference, while cosine similarity helps
 
 The central limitation is **historical data recovery**, rather than text classification.
 
-Of the 450 expected observations, **230 (51.1%) remain unavailable**:
+Of the 450 expected observations, **181 (40.2%) remain unavailable**:
 
 | Failure category | Company-years |
 |---|---:|
-| No eligible in-year capture for selected URL | 170 |
-| No usable About Us URL selected | 45 |
-| Extraction or rendering failures | 15 |
-| **Total** | **230** |
+| No eligible in-year capture for checked About URLs | 164 |
+| Capture replay, extraction, or rendering failures | 17 |
+| **Total** | **181** |
 
-Five companies, AVGO, INTC, MDT, COP, and VLO, have no usable observations.
+All 50 companies have at least one usable observation. The targeted recovery produced nine-year histories for Salesforce, Intel, Medtronic, and Valero, seven years for Broadcom, and eight for ConocoPhillips.
 
 The largest challenge is that corporate websites are not historically stable. Companies redesign their websites, move values statements between pages, change domains, and sometimes consolidate or discontinue older URLs. A selected modern About Us URL may have no archived captures even when equivalent content existed elsewhere.
 
-The current pipeline searches a limited number of candidate URLs and captures. It does not exhaustively reconstruct each company's historical website architecture. Consequently, **failure to recover a page is not evidence that the page or its values statement did not exist**.
+The pipeline searches a bounded number of candidate URLs, historical homepages, and captures. It does not exhaustively reconstruct each company's historical website architecture. Consequently, **failure to recover a page is not evidence that the page or its values statement did not exist**.
 
 Extraction introduces further difficulties. Some archived HTML references scripts or resources that were never preserved, while other captures replay incomplete content or redirect to live pages. Browser rendering improves recovery in some cases but cannot reconstruct missing archival resources.
 
 ### Why these gaps remain
 
-A more comprehensive recovery strategy is feasible but was not fully implementable within the assignment's time constraints. It would involve:
+A broader recovery strategy could extend the current discovery checks through:
 
-- Searching historical URLs independently for each year, rather than relying primarily on a selected URL.
-- Exploring archived site navigation, sitemaps, and redirect histories to reconstruct changes in page location.
-- Expanding capture attempts and browser-based recovery for difficult websites.
+- Reconstructing URLs independently for every missing year, beyond the two historical homepage probes.
+- Exploring archived sitemaps and more extensive redirect histories.
+- Reviewing alternative capture dates within the three-attempt annual budget.
 - Manually reviewing unresolved observations and using archived equivalent pages where justified.
 
 These improvements would increase collection time and require additional verification to ensure that recovered pages remain comparable.
 
-I therefore chose **bounded, auditable collection with explicit missingness** rather than accepting weakly matched pages, using adjacent-year substitutions, or silently filling gaps.
+Collection remains **bounded and auditable**, with a recorded reason for each missing company-year. Missing years stay blank; adjacent-year text is not substituted.
 
 This decision preserves data integrity but introduces selection bias. More recent years have substantially better coverage, and sector differences may partly reflect archival accessibility rather than differences in corporate values.
 
@@ -134,11 +139,13 @@ A local audit additionally records page selection, capture attempts, extraction 
 
 ## Limitations and next steps
 
-**Coverage and selection bias.** With only 48.9% coverage, the sample cannot support unrestricted longitudinal or sector-level generalizations. Comparisons should use matched observations and report sample sizes.
+**Coverage and selection bias.** With 59.8% coverage, the sample cannot support unrestricted longitudinal or sector-level generalizations. Comparisons should use matched observations and report sample sizes.
+
+**Extraction.** Identifiable navigation, archive overlays, and social-feed widgets are removed, but some contact prompts or layout fragments can remain. These may affect classifications or wording-change flags.
 
 **Page comparability.** A website redesign or shift in the location of mission statements can produce apparent changes without any substantive change in corporate priorities.
 
-**Classification validity.** LLM categorization supports contextual interpretation but remains subject to errors. Independent human annotation  along with more robust category matching algorithms from NLP would be needed to evaluate consistency and accuracy.
+**Classification validity.** LLM categorization supports contextual interpretation but remains subject to errors. Independent human annotation and comparisons with alternative NLP methods are needed to evaluate consistency and accuracy.
 
 **Stated values versus conduct.** Public-facing pages reflect organizational communication, not verified behavior. Part 2 provides a separate disclosure-based perspective, but the two sources cannot be treated as interchangeable evidence.
 
@@ -160,3 +167,5 @@ uv run python main.py
 # Retry a selected company's missing observations
 uv run python main.py AVGO
 ```
+
+The default command resumes the roster and skips unchanged completed companies. Explicit tickers retry their saved gaps while retaining accepted text. A change to the discovery method also reopens earlier gaps.

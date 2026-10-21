@@ -29,8 +29,8 @@ NOTE_WORD_LIMIT = 30
 EMBEDDING_TOKEN_LIMIT = 8192
 MAX_CANDIDATES = 3
 MAX_CAPTURES_PER_YEAR = 3
-DISCOVERY_BACKEND = 'archive-aware-one-page-v2'
-EXTRACTOR_METHOD = 'simple-body-v4'
+DISCOVERY_BACKEND = 'headless-about-discovery-v3'
+EXTRACTOR_METHOD = 'simple-body-v5'
 ANALYSIS_METHOD = 'supported_statement_lines_v5'
 COMPARISON_METHOD = 'adjacent_normalized_whole_page_v2'
 

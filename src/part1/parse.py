@@ -1,14 +1,16 @@
-"""Extract one About URL from at most three captures per company-year."""
+"""Extract About text from at most three captures per company-year."""
 
+import asyncio
 import re
+import time
 import unicodedata
 from collections.abc import Callable
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 from trafilatura import extract
-from playwright.sync_api import Error as BrowserError, Request, Response, Route, sync_playwright
-from playwright.sync_api import TimeoutError as BrowserTimeoutError
+from playwright.async_api import (Error as BrowserError, Request, Response, Route,
+                                  TimeoutError as BrowserTimeoutError, async_playwright)
 
 from src.part1.common import (ArchiveRateLimited, Audit, Capture, CaptureUnavailable,
                               EXTRACTOR_METHOD, MAX_CAPTURES_PER_YEAR, Row, archive_source,
@@ -18,6 +20,8 @@ from src.part1.discover import ABOUT, EXCLUDED, REVIEWED_ROOTS, Page, page_captu
 # Remove only identifiable UI here; Trafilatura handles body selection and boilerplate.
 BOILERPLATE = ('nav,footer,[role=navigation],[role=contentinfo],[role=dialog],'
                '[role=search],[aria-modal=true],#wm-ipp,#wm-ipp-base,#wm-ipp-print,#donato,'
+               '#donate_banner_desktop,#donate_banner_mobile,.js-donate-banner,#topnav,ia-topnav,'
+               '.social-feed,.social_feed,.social_feed_wrapper,.twitter-timeline,'
                '.cookie-banner,#onetrust-banner-sdk,#onetrust-consent-sdk,'
                'script,style,noscript,svg,template,'
                'video,audio,button,input,select,textarea,[hidden],[aria-hidden=true]')
@@ -25,7 +29,11 @@ ERROR_PAGE = re.compile(
     r'\b(access denied|403 forbidden|404 not found|page not found|'
     r'brand config page only|pardon our interruption|verify (?:that )?you are human|'
     r'checking your browser|request (?:has been )?blocked|service unavailable|'
-    r'internal server error|server error|something has gone wrong on our end)\b', re.I)
+    r'internal server error|server error|page can ?not render|'
+    r'something (?:went|has gone) wrong on our end)\b', re.I)
+ARCHIVE_UI = re.compile(
+    r'Got an HTTP \d{3} response at crawl time|'
+    r'Please Don[’\x27]t Scroll Past This', re.I)
 LINK_PROMPT = re.compile(
     r'^(?:[-•*]\s*)?(?:learn (?:more|about|how)|read (?:more|our|the)|find (?:out|information)|'
     r'for (?:the )?latest information\b|'
@@ -101,6 +109,8 @@ def unusable_reason(text: str, title: str = '') -> str:
     """Identify explicit error pages and statistics without substantive prose."""
     if ERROR_PAGE.search(title) or ERROR_PAGE.search(text[:600]):
         return 'Error page or configuration placeholder.'
+    if ARCHIVE_UI.search(text):
+        return 'Wayback interface or unresolved redirect, not corporate body text.'
     lines = text.splitlines()
     statistics = sum(bool(re.fullmatch(r'[$€£\d,.%+\s]+', line.strip())) for line in lines)
     narrative = sum(len(line.split()) for line in lines
@@ -176,6 +186,8 @@ def choose_parser(raw: bytes | str, url: str) -> tuple[str, Audit]:
     """Extract with Trafilatura after checking page scope and obvious error content."""
     soup = BeautifulSoup(raw, 'html.parser')
     title = soup.title.get_text(' ', strip=True) if soup.title else ''
+    if re.match(r'^Loading\b', title) and soup.find('a', string=re.compile(r'^Impatient\?$')):
+        raise NeedsRendering('Wayback redirect interstitial has not resolved.')
     if EXCLUDED.search(urlsplit(url).path):
         raise ValueError('News/product/support page is outside corporate About scope.')
     host = (urlsplit(url).hostname or '').removeprefix('www.')
@@ -233,146 +245,202 @@ def choose_parser(raw: bytes | str, url: str) -> tuple[str, Audit]:
 
 
 def render(capture: Capture, year: int, detail: Audit) -> tuple[str, str]:
-    """Try one short browser replay; accept only complete, same-year archive content."""
+    """Keep the pipeline synchronous while browser resources load concurrently."""
+    return asyncio.run(_render(capture, year, detail))
+
+
+async def _render(capture: Capture, year: int, detail: Audit) -> tuple[str, str]:
+    """Render one dated capture, following archived redirects and waiting for body text."""
     url = f"https://web.archive.org/web/{capture['timestamp']}/{capture['original']}"
     resources: list[Audit] = []
     blocked: list[str] = []
     failed: list[str] = []
     pending: set[Request] = set()
-    content_types = {'document', 'xhr', 'fetch'}
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+    redirect_hops = 0
+    deadline = time.monotonic() + 20
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(headless=True)
         context = None
         try:
-            context = browser.new_context(service_workers='block')
-            page = context.new_page()
+            context = await browser.new_context(service_workers='block')
+            page = await context.new_page()
 
             def content(request: Request) -> bool:
                 parts = urlsplit(request.url)
-                return ((request.resource_type in content_types
-                         or request.resource_type == 'script' and parts.path.startswith('/web/'))
-                        and not parts.path.startswith(('/__wb/', '/services/wayback-data/'))
-                        and not (parts.hostname == 'archive.org' and parts.path == '/includes/donate.php')
-                        and not any('prefetch' in request.headers.get(key, '') for key in ('purpose', 'sec-purpose')))
+                return ((request.resource_type in {'document', 'xhr', 'fetch', 'script'})
+                        and not (parts.hostname == 'web.archive.org' and (
+                            parts.path.startswith(('/__wb/', '/services/wayback-data/', '/screenshot/'))
+                            or re.search(r'/https?://web\.archive\.org/screenshot/', parts.path)))
+                        and not (parts.hostname == 'web-static.archive.org'
+                                 and parts.path.startswith('/_static/'))
+                        and not any('prefetch' in request.headers.get(key, '')
+                                    for key in ('purpose', 'sec-purpose')))
 
-            def route_request(route: Route) -> None:
+            async def route_request(route: Route) -> None:
                 request = route.request
                 parts = urlsplit(request.url)
                 if (parts.hostname == 'web-static.archive.org' and parts.path.startswith('/_static/')
                         and request.resource_type in {'script', 'stylesheet'}):
-                    route.continue_()
-                elif (parts.hostname != 'web.archive.org' or parts.path.startswith(
-                        ('/__wb/', '/services/wayback-data/'))
-                        or any('prefetch' in request.headers.get(key, '') for key in ('purpose', 'sec-purpose'))):
+                    await route.continue_()
+                    return
+                if (parts.hostname != 'web.archive.org'
+                        or parts.path.startswith(('/__wb/', '/services/wayback-data/', '/screenshot/'))
+                        or re.search(r'/https?://web\.archive\.org/screenshot/', parts.path)
+                        or '/api/ixf/' in parts.path
+                        or request.resource_type in {'image', 'media', 'font'}
+                        or any('prefetch' in request.headers.get(key, '')
+                               for key in ('purpose', 'sec-purpose'))):
                     if content(request):
                         blocked.append(request.url)
-                    route.abort()
-                elif request.resource_type in {'image', 'media', 'font'}:
-                    route.abort()
-                else:
-                    # Reject out-of-year content before scripts can insert it.
-                    if content(request):
-                        try:
-                            archive_source(request.url, year)
-                        except ValueError:
-                            blocked.append(request.url)
-                            route.abort()
-                            return
-                    route.continue_()
+                    await route.abort()
+                    return
+                if not content(request):
+                    await route.continue_()
+                    return
+                try:
+                    archive_source(request.url, year)
+                    if request.resource_type == 'document' and redirect_hops > 5:
+                        raise ValueError('Archive redirect loop or more than five hops.')
+                    await route.continue_()
+                except ValueError as error:
+                    blocked.append(request.url)
+                    resources.append({'url': request.url, 'type': request.resource_type,
+                                      'blocked': True, 'reason': str(error)})
+                    await route.abort()
 
             def record(response: Response) -> None:
+                nonlocal redirect_hops
                 if content(response.request):
+                    if response.request.resource_type == 'document' and 300 <= response.status < 400:
+                        redirect_hops += 1
                     resources.append({'url': response.url, 'status': response.status,
                                       'type': response.request.resource_type,
                                       'memento': response.headers.get('memento-datetime')})
 
-            context.route('**/*', route_request)
+            await context.route('**/*', route_request)
             page.on('request', lambda request: pending.add(request) if content(request) else None)
             page.on('requestfinished', lambda request: pending.discard(request))
             page.on('requestfailed', lambda request: pending.discard(request))
             page.on('requestfailed', lambda request: failed.append(request.url) if content(request) else None)
             page.on('response', record)
-            response = page.goto(url, wait_until='domcontentloaded', timeout=15000)
-            if response is not None and response.status == 429:
-                raise ArchiveRateLimited('Archive browser replay returned HTTP 429; retry after the cooldown.')
-            if response is None or response.status != 200:
-                raise ValueError('Browser replay did not return HTTP 200.')
             try:
-                page.wait_for_load_state('networkidle', timeout=4000)
+                await page.goto(url, wait_until='domcontentloaded', timeout=15000)
             except BrowserTimeoutError:
-                pass
-            memento = next((r['memento'] for r in reversed(resources)
-                            if r['type'] == 'document' and r['url'] == page.url), None)
-            source, original = archive_source(page.url, year, memento)
-            if not same_corporate_host(original, capture['original']):
-                raise ValueError('Browser redirected to an unverified corporate host.')
-            if any(resource['status'] == 429 for resource in resources):
-                raise ArchiveRateLimited('Archive browser content returned HTTP 429; retry after the cooldown.')
-            if blocked or failed or pending:
-                raise ValueError('Partial render: live, out-of-year, failed or pending content requests.')
-            for resource in resources:
-                if 300 <= resource['status'] < 400:
+                detail['navigation_warning'] = 'Navigation timed out; checking the rendered body.'
+            last_error = 'Browser replay did not produce substantive corporate body text.'
+            previous_text = ''
+            redirects: list[str] = []
+            while time.monotonic() < deadline:
+                if any(resource.get('status') == 429 for resource in resources):
+                    raise ArchiveRateLimited('Archive browser returned HTTP 429; retry after the cooldown.')
+                impatient = page.get_by_role('link', name='Impatient?', exact=True)
+                if await impatient.count():
+                    destination = urljoin(page.url, await impatient.get_attribute('href') or '')
+                    _, original = archive_source(destination, year)
+                    if not same_corporate_host(original, capture['original']):
+                        raise ValueError('Browser redirect left the verified corporate host.')
+                    redirect_hops += 1
+                    if destination in redirects or redirect_hops > 5:
+                        raise ValueError('Wayback redirect loop or more than five redirect hops.')
+                    redirects.append(destination)
+                    detail['browser_redirects'] = redirects
+                    try:
+                        await page.goto(destination, wait_until='domcontentloaded',
+                                  timeout=max(1, min(15000, int((deadline - time.monotonic()) * 1000))))
+                    except BrowserTimeoutError:
+                        pass
                     continue
-                if resource['status'] != 200:
-                    raise ValueError('Partial render: archived content request failed.')
-                archive_source(resource['url'], year, resource['memento'])
-            html = page.evaluate("""() => {
-                const copy = document.documentElement.cloneNode(true);
-                const originals = [...document.documentElement.querySelectorAll('*')];
-                const clones = [...copy.querySelectorAll('*')];
-                originals.forEach((node, i) => {
-                    const style = getComputedStyle(node);
-                    if (style.display === 'none' || style.visibility === 'hidden') clones[i]?.remove();
-                });
-                return copy.outerHTML;
-            }""")
-            return str(html), source
+                documents = [resource for resource in resources
+                             if resource['type'] == 'document' and resource['url'] == page.url]
+                if not documents:
+                    last_error = 'Archived document did not load within browser timeout.'
+                    await page.wait_for_timeout(min(500, max(1, int((deadline - time.monotonic()) * 1000))))
+                    continue
+                if documents and documents[-1].get('status') != 200:
+                    raise ValueError(f"Browser replay HTTP {documents[-1].get('status', 'blocked')}.")
+                memento = documents[-1].get('memento') if documents else None
+                source, original = archive_source(page.url, year, memento)
+                if not same_corporate_host(original, capture['original']):
+                    raise ValueError('Browser redirected to an unverified corporate host.')
+                snapshot_url = page.url
+                html = await page.evaluate("""() => {
+                    const copy = document.documentElement.cloneNode(true);
+                    const originals = [...document.documentElement.querySelectorAll('*')];
+                    const clones = [...copy.querySelectorAll('*')];
+                    originals.forEach((node, i) => {
+                        const style = getComputedStyle(node);
+                        if (style.display === 'none' || style.visibility === 'hidden') clones[i]?.remove();
+                    });
+                    return copy.outerHTML;
+                }""")
+                if page.url != snapshot_url:
+                    previous_text = ''
+                    continue
+                try:
+                    text, _ = choose_parser(html, original)
+                    if text == previous_text:
+                        if redirect_hops > 5:
+                            raise ValueError('Archive redirect chain exceeded five hops.')
+                        for resource in resources:
+                            if 200 <= resource.get('status', 0) < 300:
+                                archive_source(resource['url'], year, resource.get('memento'))
+                        return str(html), source
+                    previous_text = text
+                except ValueError as error:
+                    previous_text = ''
+                    last_error = str(error)
+                    if 'Error page or configuration placeholder' in last_error:
+                        raise
+                await page.wait_for_timeout(min(500, max(1, int((deadline - time.monotonic()) * 1000))))
+            raise ValueError(last_error)
         except BrowserError as error:
             raise ValueError(f'Browser replay failed: {error.message[:300]}') from error
         finally:
-            detail.update(resources=resources, blocked_content=blocked, failed_requests=failed,
+            detail.update(resources=resources, blocked_content=list(dict.fromkeys(blocked)),
+                          failed_requests=list(dict.fromkeys(failed)),
                           pending_requests=[request.url for request in pending])
             try:
                 if context is not None:
-                    context.close()
+                    await context.unroute_all(behavior='ignoreErrors')
+                    await context.close()
             finally:
-                browser.close()
+                await browser.close()
 
 
 def parse(ticker: str, page: Page | None, rows: list[Row], audit: Audit,
           save: Callable[[], None]) -> None:
-    """Keep successful text; try three captures of one URL, then record a gap."""
+    """Keep saved text; share three annual capture attempts across eligible About URLs."""
     years = audit.setdefault('years', {})
     pending = [row for row in rows if not row['page_text_clean']
                and years.get(row['year'], {}).get('status') != 'gap']
     if not pending:
         return
-    captures = page_captures(page, audit) if page else []
-    captures = [capture for capture in captures
-                if source_in_period(ticker, capture['original'], capture['timestamp'])]
+    pages = [page, *page.get('alternatives', [])] if page else []
+    sources = [(source, [capture for capture in page_captures(source, audit)
+                        if source_in_period(ticker, capture['original'], capture['timestamp'])])
+               for source in pages]
     by_year = {int(row['year']): row for row in rows}
     for row in sorted(pending, key=lambda item: item['year'], reverse=True):
         year = int(row['year'])
         detail: Audit = {'status': 'pending', 'attempts': []}
         years[str(year)] = detail
-        browser_tried = False
-        for capture in sample(captures, year)[:MAX_CAPTURES_PER_YEAR]:
+        samples = [(source, sample(captures, year)) for source, captures in sources]
+        attempts = [(source, captures[number]) for number in range(MAX_CAPTURES_PER_YEAR)
+                    for source, captures in samples if number < len(captures)]
+        for source_page, capture in attempts[:MAX_CAPTURES_PER_YEAR]:
             requested = f"https://web.archive.org/web/{capture['timestamp']}id_/{capture['original']}"
             attempt: Audit = {'requested_url': requested}
             detail['attempts'].append(attempt)
             print(f'{ticker} {year}: trying {capture["timestamp"]} at {capture["original"]}', flush=True)
             try:
-                raw, source = replay(capture, year)
-                _, original = archive_source(source, year)
                 mode = 'html'
                 try:
+                    raw, source = replay(capture, year)
+                    _, original = archive_source(source, year)
                     text, extraction = choose_parser(raw, original)
-                except NeedsRendering as error:
+                except (CaptureUnavailable, ValueError) as error:
                     attempt['static_error'] = str(error)
-                    if browser_tried or b'<script' not in raw.lower():
-                        raise
-                    browser_tried = True
-                    print(f'{ticker} {year}: trying one browser replay', flush=True)
+                    print(f'{ticker} {year}: static capture unusable; trying browser replay', flush=True)
                     raw, source = render(capture, year, attempt)
                     _, original = archive_source(source, year)
                     text, extraction = choose_parser(raw, original)
@@ -385,7 +453,7 @@ def parse(ticker: str, page: Page | None, rows: list[Row], audit: Audit,
                 row.update(page_text_clean=text, snapshot_url=source, analyst_notes='',
                            theme_categories='', changed_from_prior='', page_similarity_to_prior_year='')
                 detail.update(status='extracted', mode=mode, extraction=extraction,
-                              candidate_url=page['url'], text_validation=EXTRACTOR_METHOD)
+                              candidate_url=source_page['url'], text_validation=EXTRACTOR_METHOD)
                 attempt.update(outcome='accepted', source=source, words=len(text.split()))
                 if following := by_year.get(year + 1):
                     following.update(changed_from_prior='', page_similarity_to_prior_year='')
@@ -401,7 +469,9 @@ def parse(ticker: str, page: Page | None, rows: list[Row], audit: Audit,
                 save()
         if not row['page_text_clean']:
             reason = (detail['attempts'][-1]['error'] if detail['attempts'] else
-                      'No eligible in-year captures for the selected About URL.' if page else
+                      'About URL indexing was incomplete; retry discovery.' if any(
+                          item.get('index_error') for item in audit.get('source_discovery', {}).get('choices', [])) else
+                      'No eligible in-year captures for the discovered About URLs.' if page else
                       'No usable About URL selected.')
             row['analyst_notes'] = diagnostic(
                 f'Text unavailable after {len(detail["attempts"])} sampled captures. {reason}')

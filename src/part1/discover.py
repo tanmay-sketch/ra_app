@@ -1,10 +1,10 @@
-"""Choose one official About page, then sample at most three captures per year."""
+"""Find official About pages and recover their historical URL variants."""
 
 from collections.abc import Callable
 from datetime import datetime
 import os
 import re
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 from src.part1.common import (ArchiveUnavailable, Audit, Capture, DISCOVERY_BACKEND,
                               MAX_CANDIDATES, MAX_CAPTURES_PER_YEAR, MODEL, YEARS,
-                              archive_get, ask, encoded, source_in_period)
+                              ArchiveRateLimited, archive_get, archive_source, ask, encoded,
+                              source_in_period)
 from src.tickers import TICKERS
 
 CDX = 'https://web.archive.org/cdx/search/cdx'
@@ -23,7 +24,7 @@ ABOUT = re.compile(
     r"(?:company|corporate).(?:info|overview|profile)|ethics|business.conduct|"
     r"\b(?:company|values|purpose|vision|mission|principles|credo|culture)\b|owner.?s?.manual", re.I)
 EXCLUDED = re.compile(
-    r'/(newsroom|news|press(?:release)?s?|blogs?|articles|events|products|support|docs|manuals|ownersmanual|sitemap|site-map|owners)(/|$)', re.I)
+    r'/(newsroom|news|press(?:release)?s?|blogs?|articles|(?:[a-z0-9]+-)?stories|events|products|support|docs|manuals|ownersmanual|sitemap|site-map|owners)(/|$)', re.I)
 REVIEWED_ROOTS = {'abc.xyz'}
 
 # Reviewed corporate identities keep search results grounded to official domains.
@@ -57,10 +58,12 @@ OFFICIAL_DOMAINS: dict[str, tuple[str, ...]] = {
     'OXY': ('oxy.com',), 'HAL': ('halliburton.com',),
 }
 
-# Grounded source hints are choices for the model, never extra fallback pages.
+# Reviewed historical sources supplement observed homepage links.
 REVIEWED_PAGES = {
     'AAPL': [('https://www.apple.com/jobs/us/about.html', 'Historical Apple About and values page')],
     'NVDA': [('https://www.nvidia.com/en-us/about-nvidia/', 'About NVIDIA')],
+    'AVGO': [('http://www.broadcom.com/company', 'Historical Broadcom About Us'),
+             ('https://www.broadcom.com/company/about-us', 'Broadcom About Us')],
     'META': [('https://about.fb.com/company-info/', 'Facebook company information'),
              ('https://newsroom.fb.com/company-info/', 'Historical Facebook company information')],
     'CRM': [('https://www.salesforce.com/company/', 'Historical Salesforce company overview')],
@@ -99,10 +102,12 @@ class Page(TypedDict):
     url: str
     reason: str
     captures: list[Capture] | None
+    alternatives: NotRequired[list['Page']]
 
 
 class SearchChoice(BaseModel):
-    index: int | None = Field(default=None, ge=0, le=MAX_CANDIDATES - 1)
+    index: int | None = Field(default=None, ge=0)
+    alternatives: list[int] = Field(default_factory=list)
     reason: str = Field(max_length=160)
 
 
@@ -144,7 +149,7 @@ def official_host(ticker: str, url: str) -> bool:
 
 
 def rank_links(ticker: str, links: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Keep observed official About-like URLs and deduplicate tracking variants."""
+    """Rank official About links, excluding directories and tracking duplicates."""
     hints = {url_key(url) for url, _ in REVIEWED_PAGES.get(ticker, [])}
     found = {}
     for link in links:
@@ -156,39 +161,116 @@ def rank_links(ticker: str, links: list[dict[str, str]]) -> list[dict[str, str]]
             label = ' '.join(link.get('title', '').split())
             if not official_host(ticker, url):
                 continue
+            if not path and not reviewed and host not in REVIEWED_ROOTS and not host.startswith('about.'):
+                continue
             if not reviewed and (EXCLUDED.search(path)
+                                 or re.search(r'/(?:locations|offices|leadership|executives|executive-team|board-directors|reports|annual-reports|contact|legal)(/|$)', path, re.I)
+                                 or re.search(r'(?:privacy|cookie|terms-of-use|dmca|proposition-65|analyst-reports)', path, re.I)
                                  or re.search(r'/(careers|jobs)(/|$)', path)
-                                 or re.search(r'(^|\.)(careers|jobs|docs|developer|trailhead)\.', host)):
+                                 or re.search(r'(^|\.)(careers|jobs|docs|developer|trailhead|news|blog|wp)\.', host)):
                 continue
             if not reviewed and not ABOUT.search(f'{label} {unquote(path)}') and not host.startswith('about.'):
                 continue
         except (KeyError, ValueError):
             continue
         found.setdefault(key, {'href': url, 'title': label[:200], 'body': link.get('body', '')[:400]})
-    return list(found.values())
+    def priority(link: dict[str, str]) -> tuple[int, int]:
+        path = unquote(urlsplit(link['href']).path).lower()
+        label = link['title'].lower()
+        if re.search(r'/(?:governance|policy)/', path):
+            tier = 3
+        elif re.search(r'(?:values|mission|purpose|principles|credo)', path + ' ' + label):
+            tier = 0
+        elif re.search(r'(?:about[-_/ ]?us|who[-_/ ]?we[-_/ ]?are|our[-_/ ]?(?:company|story)|overview)', path + ' ' + label):
+            tier = 1
+        elif re.fullmatch(r'/?(?:company|corporate|about)(?:\.(?:html?|aspx?))?/?', path):
+            tier = 2
+        else:
+            tier = 3
+        return tier, path.count('/')
+    return sorted(found.values(), key=priority)
 
 
 def extract_homepage_links(ticker: str, html: str | bytes, base_url: str) -> list[dict[str, str]]:
     soup = BeautifulSoup(html, 'html.parser')
-    return rank_links(ticker, [
-        {'href': urljoin(base_url, str(anchor['href'])),
-         'title': str(anchor.get_text(' ', strip=True) or anchor.get('aria-label') or anchor.get('title') or '')}
-        for anchor in soup.select('a[href]')])
+    links = []
+    for anchor in soup.select('a[href]'):
+        href = str(anchor['href']).strip()
+        if not href or href.startswith('#'):
+            continue
+        url = urljoin(base_url, href)
+        archived = re.fullmatch(r'https?://web\.archive\.org/web/\d+(?:[a-z_]+)?/(https?://.*)', url)
+        links.append({'href': archived[1] if archived else url,
+                      'title': str(anchor.get_text(' ', strip=True) or anchor.get('aria-label')
+                                   or anchor.get('title') or '')})
+    return rank_links(ticker, links)
 
 
-def homepage_links(ticker: str) -> tuple[list[dict[str, str]], Audit]:
-    """One static homepage request, only when search supplies no candidates."""
+def homepage_links(ticker: str, year: int | None = None) -> tuple[list[dict[str, str]], Audit]:
+    """Read rendered homepage navigation in a separate headless browser."""
+    from playwright.sync_api import Error, sync_playwright
+
     homepage = f'https://{OFFICIAL_DOMAINS[ticker][0]}/'
+    url = f'https://web.archive.org/web/{year}0701/{homepage}' if year else homepage
+    detail: Audit = {'url': url, 'mode': 'headless'}
     try:
-        response = httpx.get(homepage, follow_redirects=True, timeout=20,
-                             headers={'User-Agent': 'Mozilla/5.0'})
-        response.raise_for_status()
-        if not official_host(ticker, str(response.url)):
-            raise ValueError('Homepage redirected outside the reviewed company domains.')
-    except httpx.HTTPError as error:
-        raise ValueError(f'Homepage request failed ({type(error).__name__}).') from error
-    return extract_homepage_links(ticker, response.text, str(response.url)), {
-        'url': homepage, 'resolved_url': str(response.url)}
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(service_workers='block')
+                context.route('**/*', lambda route: route.abort()
+                              if route.request.resource_type in {'image', 'media', 'font'}
+                              or year and urlsplit(route.request.url).hostname not in
+                              {'web.archive.org', 'web-static.archive.org'} else route.continue_())
+                view = context.new_page()
+                response = view.goto(url, wait_until='domcontentloaded', timeout=20000)
+                for _ in range(5):
+                    impatient = view.get_by_role('link', name='Impatient?', exact=True)
+                    if not year or not impatient.count():
+                        break
+                    destination = urljoin(view.url, impatient.get_attribute('href') or '')
+                    original = archive_source(destination, year)[1]
+                    if not official_host(ticker, original):
+                        raise ValueError('Archived homepage redirect left the company domains.')
+                    detail.setdefault('redirects', []).append(destination)
+                    response = view.goto(destination, wait_until='domcontentloaded', timeout=15000)
+                if year and view.get_by_role('link', name='Impatient?', exact=True).count():
+                    raise ValueError('Archived homepage redirect chain exceeded five hops.')
+                if response is not None and response.status == 429 and year:
+                    raise ArchiveRateLimited('Archived homepage returned HTTP 429.')
+                if response is None or response.status >= 400:
+                    raise ValueError(f'Homepage HTTP {response.status if response else "unavailable"}.')
+                try:
+                    view.wait_for_function("""() => [...document.querySelectorAll('a[href]')]
+                        .some(a => /about|who.we.are|our.values|our.company/i.test(a.textContent+' '+a.href))""",
+                                           timeout=5000)
+                    view.wait_for_load_state('networkidle', timeout=2000)
+                except Error:
+                    pass
+                resolved = view.url
+                original = archive_source(resolved, year, response.headers.get('memento-datetime'))[1] if year else resolved
+                if not official_host(ticker, original):
+                    raise ValueError('Homepage left the reviewed company domains.')
+                detail['resolved_url'] = resolved
+                links = extract_homepage_links(ticker, view.content(), resolved)
+                detail['links'] = links
+                return links, detail
+            finally:
+                browser.close()
+    except (Error, ValueError) as error:
+        if year:
+            raise ValueError(f'Archived homepage discovery failed: {str(error)[:200]}') from error
+        detail['browser_error'] = str(error)[:200]
+        try:
+            response = httpx.get(homepage, follow_redirects=True, timeout=15,
+                                 headers={'User-Agent': 'Mozilla/5.0'})
+            response.raise_for_status()
+            if not official_host(ticker, str(response.url)):
+                raise ValueError('Homepage left the reviewed company domains.')
+            links = extract_homepage_links(ticker, response.text, str(response.url))
+            return links, detail | {'mode': 'static', 'resolved_url': str(response.url), 'links': links}
+        except httpx.HTTPError as error:
+            raise ValueError(f'Homepage discovery failed ({type(error).__name__}).') from error
 
 
 def search_links(ticker: str) -> tuple[list[dict[str, str]], Audit]:
@@ -220,89 +302,107 @@ def search_links(ticker: str) -> tuple[list[dict[str, str]], Audit]:
 
 
 def discover(ticker: str, audit: Audit, save: Callable[[], None]) -> Page | None:
-    """Check at most three exact indexes, then select one historically usable URL."""
-    entry = audit.get('source_discovery', {})
-    indexed: dict[str, list[Capture]] = {}
-    successful = next((detail['candidate_url']
-                       for _, detail in sorted(audit.get('years', {}).items(), reverse=True)
-                       if detail.get('candidate_url') and detail.get('status') in
-                       {'extracted', 'analyzed', 'analysis_failed'}), None)
-    if successful:
-        selection = {'url': successful, 'reason': 'Reusing a previously accepted archived source.'}
-        entry.update(backend=DISCOVERY_BACKEND, selection=selection)
-        audit['source_discovery'] = entry
-        save()
-    elif entry.get('backend') == DISCOVERY_BACKEND and entry.get('selection', {}).get('url'):
-        selection = entry['selection']
-    else:
-        print(f'{ticker}: selecting one official About page', flush=True)
-        links, search = search_links(ticker)
-        entry = {'backend': DISCOVERY_BACKEND, 'search': search}
-        audit['source_discovery'] = entry
-        if search.get('status') != 'unconfigured':
+    """Inspect current navigation and keep alternatives for missing historical years."""
+    previous = audit.get('source_discovery', {})
+    years = audit.get('years', {})
+    needed = {year for year in YEARS if years.get(str(year), {}).get('status')
+              not in {'extracted', 'analyzed', 'analysis_failed'}}
+    hints = [{'href': url, 'title': label, 'body': 'Reviewed source hint'}
+             for url, label in REVIEWED_PAGES.get(ticker, [])]
+    hints += [{'href': detail['candidate_url'], 'title': 'Previously accepted About page'}
+              for detail in years.values() if detail.get('candidate_url')]
+    hints += [{'href': item['href'], 'title': item.get('title', '')}
+              for item in previous.get('choices', []) if item.get('href')]
+    entry: Audit = {'backend': DISCOVERY_BACKEND, 'homepages': [], 'choices': []}
+    audit['source_discovery'] = entry
+    audit['discovery'] = []
+    print(f'{ticker}: looking for About pages in headless homepage navigation', flush=True)
+    try:
+        links, detail = homepage_links(ticker)
+        entry['homepages'].append(detail)
+    except ValueError as error:
+        links = []
+        entry['homepages'].append({'error': str(error)})
+    if not links:
+        links, entry['search'] = search_links(ticker)
+        if entry['search'].get('status') != 'unconfigured':
             audit.setdefault('usage', {}).setdefault('search', {'calls': 0})['calls'] += 1
-        if not links and not REVIEWED_PAGES.get(ticker):
-            try:
-                links, entry['homepage'] = homepage_links(ticker)
-            except ValueError as error:
-                entry['homepage_error'] = str(error)
-        hints = [{'href': url, 'title': label, 'body': 'Reviewed source hint'}
-                 for url, label in REVIEWED_PAGES.get(ticker, [])]
-        candidates = rank_links(ticker, hints + links)[:MAX_CANDIDATES]
-        entry['choices'] = []
-        choices = []
+    pool = rank_links(ticker, links + hints)
+    indexed: dict[tuple[str, str, str], list[Capture]] = {}
+    errors = []
+
+    def check(candidates: list[dict[str, str]]) -> None:
         for candidate in candidates:
+            key = page_identity(candidate['href'])
+            if key in indexed:
+                continue
             record: Audit = dict(candidate)
             entry['choices'].append(record)
             try:
                 captures = [capture for capture in index(candidate['href'])
                             if source_in_period(ticker, capture['original'], capture['timestamp'])]
+                indexed[key] = captures
+                record.update(years=[year for year in YEARS if sample(captures, year)],
+                              indexed_captures=len(captures))
+            except ArchiveRateLimited:
+                raise
             except (ArchiveUnavailable, ValueError) as error:
                 record['index_error'] = str(error)
-                save()
-                raise  # A failed index request is not evidence of missing captures.
-            covered = [year for year in YEARS if sample(captures, year)]
-            record.update(years=covered, indexed_captures=len(captures))
-            indexed[candidate['href']] = captures
-            if covered:
-                choices.append(record)
+                errors.append(error)
+                indexed[key] = []
             save()
-            if len(covered) == len(YEARS) and candidate['body'] == 'Reviewed source hint':
-                break  # A reviewed source covering every year needs no more index probes.
-        selection = {'url': None, 'reason': 'No official About-equivalent candidates found.'}
-        if candidates and not choices:
-            selection['reason'] = 'Checked candidates have no eligible study-period captures.'
-        if choices:
-            prompt = (
-                f'Select the single best corporate About page for {TICKERS[ticker]["name"]}. '
-                'Choose a company-wide overview, mission, purpose, values, principles or story page. '
-                'Reject product, help, careers/recruiting, news, leadership-only, investor-data and legal pages. '
-                'A historical About page or owner manual explaining corporate principles is eligible. '
-                'A corporate culture page is eligible when it states company-wide principles. '
-                'Every choice is an observed official URL or a reviewed source hint. '
-                'The years field lists eligible archived years, not proof of a complete page. '
-                'Among suitable pages prefer the greatest number of covered study years, '
-                'then explicit mission, values or principles over a generic overview or history. '
-                'Return null only if none fits. '
-                f'LINKS (zero-based indexes): {encoded(dict(enumerate(choices)))}')
-            choice = ask(prompt, SearchChoice, audit, stage='discovery_selection')
-            if choice.index is not None:
-                if choice.index >= len(choices):
-                    raise ValueError('Model selected an index outside the supplied candidate list.')
-                selection['url'] = choices[choice.index]['href']
-            selection['reason'] = choice.reason
-        entry['selection'] = selection | {'model': MODEL}
+
+    check(pool[:MAX_CANDIDATES])
+    covered = {year for record in entry['choices'] for year in record.get('years', [])}
+    missing = sorted(needed - covered)
+    # Two historical homepages can reveal paths removed from today's navigation.
+    for year in dict.fromkeys([missing[-1], missing[0]] if missing else []):
+        if needed <= {year for record in entry['choices'] for year in record.get('years', [])}:
+            break
+        try:
+            historical, detail = homepage_links(ticker, year)
+            entry['homepages'].append(detail)
+            check(rank_links(ticker, historical)[:MAX_CANDIDATES])
+        except ArchiveRateLimited:
+            raise
+        except ValueError as error:
+            entry['homepages'].append({'year': year, 'error': str(error)})
         save()
-    url = selection.get('url')
-    audit['discovery'] = []
-    if not url:
-        print(f'{ticker}: {selection["reason"]} Moving on.', flush=True)
+    choices = [record for record in entry['choices'] if record.get('years')]
+    selection: Audit = {'url': None, 'reason': 'No eligible archived About page found.'}
+    if choices:
+        prompt = (
+            f'Select the best corporate About page for {TICKERS[ticker]["name"]}. '
+            'Choose a company-wide overview, mission, purpose, values or principles page. '
+            'Reject product, help, recruiting, news, leadership-only, investor-data and legal pages. '
+            'Corporate culture or an owner manual explaining company-wide principles is eligible. '
+            'All choices are observed official links or reviewed sources. The years field is index '
+            'coverage, not proof of complete text. Prefer broad coverage, then explicit values. '
+            'Other suitable URLs may be used only for missing years. Return null if none fits. '
+            'List the indexes of any other eligible About pages in alternatives; omit weak matches. '
+            f'LINKS (zero-based indexes): {encoded(dict(enumerate(choices)))}')
+        choice = ask(prompt, SearchChoice, audit, stage='discovery_selection')
+        if choice.index is not None:
+            if choice.index >= len(choices):
+                raise ValueError('Model selected an index outside the supplied candidate list.')
+            positions = list(dict.fromkeys([choice.index, *choice.alternatives]))
+            if any(position < 0 or position >= len(choices) for position in positions):
+                raise ValueError('Model selected an alternative outside the supplied list.')
+            choices = [choices[position] for position in positions]
+            selected = choices[0]
+            selection['url'] = selected['href']
+        selection.update(reason=choice.reason, model=MODEL)
+    entry['selection'] = selection
+    save()
+    if not selection['url']:
+        if errors and not choices:
+            raise ArchiveUnavailable('About candidates could not be fully indexed; retry later.')
         return None
-    url = page_url(url)
-    if not official_host(ticker, url):
-        raise ValueError('Selected source is outside the reviewed company domains.')
-    print(f'{ticker}: selected {url}; at most 3 captures per year.', flush=True)
-    return Page(url=url, reason=selection.get('reason', ''), captures=indexed.get(url))
+    pages = [Page(url=record['href'], reason=selection['reason'],
+                  captures=indexed[page_identity(record['href'])]) for record in choices]
+    pages[0]['alternatives'] = pages[1:]
+    print(f'{ticker}: retained {len(pages)} About URL(s); at most 3 total captures per year.', flush=True)
+    return pages[0]
 
 
 def index(url: str) -> list[Capture]:

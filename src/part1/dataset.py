@@ -91,7 +91,7 @@ def checkpoint(rows: list[Row], audit: Audit, directory: Path = OUTPUT_DIR) -> N
     with _atomic_write(directory / "audit.jsonl") as stream:
         stream.write("\n".join(encoded(item) for item in audits.values()) + "\n")
     with _atomic_write(directory / "dataset.csv") as stream:
-        writer = csv.DictWriter(stream, fieldnames=FIELDS)
+        writer = csv.DictWriter(stream, fieldnames=FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(combined)
 

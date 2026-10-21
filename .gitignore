@@ -16,5 +16,10 @@ wheels/
 plans/
 part1/work/
 part2/work/
+part3/work/
+part1/outputs/*
+!part1/outputs/dataset.csv
 part2/outputs/*
 !part2/outputs/dataset.csv
+part3/outputs/*
+!part3/outputs/dataset.csv
