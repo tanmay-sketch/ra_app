@@ -1,153 +1,49 @@
-# Part 2: Lived Values
+# Part 2: Lived Values in Proxy Disclosures
 
-## Scope and coverage
+## Research objective and key findings
 
-Part 1 examines what companies state they value; Part 2 examines what they emphasize in recurring disclosures. I selected **DEF 14A proxy statements** because their annual regulatory structure provides comparable information on governance, executive compensation, board oversight, and shareholder matters. However, disclosed priorities are only an indirect indicator of organizational behavior.
+This part asks what companies emphasize in formal disclosures and how that emphasis shifts over time. I use **DEF 14A proxy statements** for the same 50 companies and 2016-2024 period as Part 1. Proxies provide recurring disclosures on governance, compensation, board oversight, and shareholder matters. They offer a reproducible view of *disclosed priorities*, but not direct proof of corporate behavior.
 
-The [dataset](outputs/dataset.csv) covers **421 of 450 company-years (93.6%)**, representing 49 companies across 2016–2024, with **360 adjacent-year comparisons**.
+The dataset contains **421 of 450 company-years (93.6%) across 49 companies**, including 360 valid adjacent-year comparisons. Coverage by sector is Healthcare 88/90, Technology 86/90, Financials 86/90, Energy 86/90, and Consumer Discretionary 75/90. Twenty-nine observations remain unresolved, including all nine years for Target.
 
-| Sector | Collected / Expected |
-|---|---:|
-| Healthcare | 88 / 90 |
-| Technology | 86 / 90 |
-| Financials | 86 / 90 |
-| Energy | 86 / 90 |
-| Consumer Discretionary | 75 / 90 |
+I examined changes across filing pairs bracketing five external events. These results are exploratory associations, not estimated causal effects:
 
-Of 29 missing observations, nine concern Target due to SEC issuer-selection failures, ten resulted from browser timeouts, and ten from filing-verification or extraction problems. These are unresolved collection gaps, not confirmed absences of filings.
+| Event | Matched pairs | Illustrative change in disclosure emphasis |
+|---|---:|---|
+| U.S. government transition, Jan. 2017 | 47 | Environment: -0.03 percentage points overall; Energy -0.53, Financials +0.51 |
+| COVID-19 declaration, Mar. 2020 | 44 | Employees +0.75 pp and Safety +0.57 pp; negative tone +0.43 matches per 1,000 words |
+| U.S. government transition, Jan. 2021 | 43 | Environment +0.79 pp overall, including Energy +2.62 pp; Employees +1.50 pp |
+| Invasion of Ukraine, Feb. 2022 | 44 | Environment +1.35 pp overall, including Energy +4.29 pp |
+| SEC pay-versus-performance rule, Aug. 2022 | 44 | Shareholders +0.12 pp; uncertainty +0.31 matches per 1,000 words |
 
-## Research decisions and measures
+Sector differences are more informative than overall averages. Healthcare's Employees emphasis rose 1.21 pp around COVID-19, while Energy's Environment emphasis moved particularly strongly around the 2021 and 2022 events. However, the analysis does not show that particular passages refer to those events. Filing dates also differ from drafting dates, and events overlap.
 
-**Collection.** [SEC EDGAR][edgar] supplies primary documents, identifiers, and publication dates. Searches verify issuer and annual-meeting year, excluding supplements and special-meeting-only filings. At most three candidate documents are checked per missing observation. Missing years are retained rather than substituted.
+## Sources and analytical method
 
-**Text preparation.** HTML and native PDF text is cleaned of navigation, voting instructions, repeated margins, and numeric tables. Shareholder proposals are distinguished from company responses to avoid attributing investor demands to management. Analysis uses nonoverlapping paragraphs; scanned documents require reviewed OCR.
+- **Collection:** SEC EDGAR supplies document identifiers, filings, and dates. Candidates are checked for issuer and annual meeting year; supplements and special-meeting-only statements are excluded. At most three candidates are examined for each missing observation. No year is substituted or silently imputed.
+- **Preparation:** HTML or native PDF text is cleaned of repeated margins, voting instructions, navigation, and numeric tables. Nonoverlapping paragraphs form the analysis unit. Shareholder proposals are distinguished from management responses where possible. Scanned PDFs require reviewed OCR.
+- **Theme emphasis:** spaCy phrase matching uses the same ten categories as Part 1. A paragraph is counted once for each theme it matches. `theme_share = words in paragraphs matching a theme / all analyzed words`. Overlapping categories mean shares need not sum to 1.
+- **Tone and wording:** The 1993-2025 Loughran-McDonald dictionary produces positive, negative, and uncertainty matches per 1,000 analyzed words. Adjacent filings are also compared by TF-IDF cosine similarity using lowercase unigrams/bigrams and fixed vocabulary and IDF from an initial set of 32 proxies. Freezing the representation aids consistency but misses later vocabulary.
+- **Event comparisons:** A filing pair is included if `prior filing date < event date <= current filing date`. Changes are computed within companies before equal-weight sector aggregation; missing comparisons stay blank and observed zeros remain zero.
 
-**Theme emphasis.** spaCy phrase matching identifies the ten Part 1 categories: Integrity, Innovation, Quality, Safety, Customers, Employees, Inclusion, Environment, Community, and Shareholders. The [vocabulary](../src/part2/themes.py) distinguishes ambiguous concepts such as product quality and audit controls.
-
-```text
-Theme share =
-  words in paragraphs matching the theme
-  / total analyzed words
-```
-
-A paragraph is counted once per matching theme. Themes can overlap, so shares need not sum to 100%.
-
-**Tone.** The 1993–2025 [Loughran–McDonald dictionary][dictionary] measures positive, negative, and uncertainty vocabulary using active entries.
-
-```text
-Tone rate =
-  matching word occurrences
-  / total analyzed words × 1,000
-```
-
-**Wording similarity.** Adjacent proxies are compared using TF–IDF weighted cosine similarity (0–1). Lowercase unigrams and bigrams, including numbers, retain stopwords. Weights use sublinear term frequency, `1 + ln(count)`, and smoothed inverse document frequency, `1 + ln((1 + N)/(1 + df))`. The vocabulary and IDF are frozen from the initial 32 proxies to stabilize scores, at the cost of excluding unseen terms.
-
-These methods prioritize transparent, reproducible measures over more expensive LLM-based interpretation.
-
-## Findings: shifts around external events
-
-I examined five events with plausible implications for corporate disclosure. An adjacent-year pair is included when:
-
-```text
-prior filing date < event date ≤ current filing date
-```
-
-For themes, changes are measured in percentage points; tone changes are differences in matches per 1,000 words. Sector averages weight each company equally.
-
-### 1. US government transition, January 20, 2017
-
-Across **47 matched pairs**, overall Environment emphasis declined by just 0.03 pp. Energy fell 0.53 pp, while Financials increased 0.51 pp.
-
-The opposite sector movements suggest that a change in government did not correspond to a uniform shift in environmental disclosure. Industry-specific conditions appear important, and these small averages do not establish a policy response.
-
-### 2. COVID-19 pandemic, March 11, 2020
-
-Across **44 matched pairs**, Safety emphasis increased 0.57 pp, Employees increased 0.75 pp, and negative tone increased 0.43 matches per 1,000 words.
-
-Healthcare companies showed a **1.21 pp increase in Employees emphasis**, compared with 0.43 pp in Technology and 0.58 pp in Energy. Safety increased 0.70 pp in Healthcare and 0.90 pp in Technology.
-
-The stronger Healthcare employee-language shift is consistent with heightened workforce concerns during the pandemic. However, the measures do not establish whether the relevant passages explicitly discuss COVID-19 or whether employee protections improved.
-
-### 3. US government transition, January 20, 2021
-
-Across **43 matched pairs**, Environment emphasis rose 0.79 pp overall, with a particularly large **2.62 pp increase in Energy**. Consumer Discretionary increased 0.91 pp, while Healthcare and Financials showed little change (+0.07 and +0.02 pp).
-
-Employees emphasis also increased 1.50 pp overall, reaching 3.13 pp in Consumer Discretionary.
-
-These patterns are consistent with changing environmental and workforce disclosure priorities. However, the transition coincided with continued pandemic disruption, making it impossible to isolate government-related effects.
-
-### 4. Russia's invasion of Ukraine, February 24, 2022
-
-Across **44 matched pairs**, Environment emphasis rose 1.35 pp overall. The increase was especially pronounced in **Energy (+4.29 pp)** and Financials (+2.13 pp), compared with Technology (+0.13 pp).
-
-Energy's negative-tone rate actually declined by 1.37 matches per 1,000 words, illustrating that greater thematic emphasis need not coincide with more negative language.
-
-The sector differences are compatible with changing discussions of energy supply, environmental priorities, and geopolitical exposure. However, the Environment label does not directly measure energy security or references to the war. Passage-level review is required before making that connection.
-
-### 5. SEC pay-versus-performance rule, August 25, 2022
-
-Across **44 matched pairs**, Shareholders emphasis increased only **0.12 pp** overall, while uncertainty increased 0.31 matches per 1,000 words.
-
-Energy showed the largest sector-level Shareholders increase (+0.63 pp), followed by Financials (+0.27 pp). Healthcare (-0.21 pp) and Technology (-0.12 pp) showed declines.
-
-Despite the regulation's direct relevance to proxy statements, the theme measure shows no uniform increase. This may reflect the vocabulary's breadth, differences in disclosure composition, or the distinction between rule adoption and implementation. Applicable disclosures concern fiscal years ending on or after December 16, 2022.
-
-### Interpretation
-
-Across the five comparisons, **responses appear more sector-specific than universal**. Environment emphasis changed especially strongly in Energy around the 2021 transition and 2022 invasion, while Healthcare's employee-language increase around COVID was more pronounced than in several other sectors.
-
-The findings are exploratory, not causal. Events overlap, publication dates do not identify when text was drafted, and the categories measure broad disclosure themes rather than direct references to individual events.
-
-## Dataset schema
-
-The [CSV](outputs/dataset.csv) contains one company–meeting-year per row, retaining missing observations with blank measures and documented explanations.
-
-| Column | Purpose |
-|---|---|
-| `ticker`, `company_name`, `sector` | Company identity, fixed sector, Part 1 linkage |
-| `year`, `filing_date`, `meeting_date` | Annual-meeting year and verified dates |
-| `accession`, `source_url` | SEC source verification |
-| `text_file` | Reference identifying the text extraction used for analysis |
-| `theme_shares` | JSON shares for ten themes |
-| `tone_rates` | JSON positive, negative, uncertainty rates |
-| `similarity_to_prior` | Adjacent-year TF–IDF cosine |
-| `analyst_notes` | Major changes, extraction warnings, missing-data reasons |
-
-The [implementation](../src/part2/analyze.py) calculates within-company theme and tone differences before aggregation. Equal company weights prevent longer filings from dominating results. Missing comparisons remain blank, while computed zeros are preserved.
+These choices favor transparent, reproducible measurement over treating theme-matching output as a validated interpretation of intent.
 
 ## Limitations and next steps
 
-**Measurement validity.** Proxy statements capture governance disclosures rather than verified conduct. Phrase matching may miss context or overlabel paragraphs, and the theme categories lack independent human validation. Part 1 commitment labels are not directly equivalent to Part 2 paragraph shares.
+The most serious validity risk is **context-insensitive matching**. A theme can be triggered by negation, procedural wording, director biographies, or shareholder proposals rather than a company's affirmative commitment. A targeted review of Berkshire Hathaway's 2016 and 2024 filings, pursued in Part 4, shows exactly this problem for Inclusion and Community. Differences in proxy templates, section lengths, duplicated passages, and regulatory requirements can further drive measured change.
 
-A targeted check of Berkshire Hathaway's 2016 and 2024 proxies, documented in
-[Part 4](../part4/README.md#preliminary-findings), found Inclusion matches in
-procedural wording about including shareholder proposals in a proxy statement
-and in a statement rejecting diversity as a director-selection criterion.
-Community matches largely concerned directors' charitable-foundation backgrounds.
-The matcher counts whole paragraphs without resolving these contexts. Such
-matches do not establish affirmative company commitments and can affect both
-Part 3 scores and Part 4 clusters.
+Fifty-one retained filings have extraction warnings. The 29 missing observations reflect nine Target issuer-selection failures, ten browser timeouts, and ten filing-verification or extraction problems, not confirmed absence of filings. With more time, I would recover missing proxies, validate theme labels against human-coded passages, isolate comparable proxy sections, and separately examine event-specific text. The descriptive event comparisons do not include causal controls or significance tests.
 
-**Comparability.** Regulatory requirements, document composition, and the frozen TF–IDF vocabulary can influence observed changes. Event windows may overlap, and no causal controls or significance tests have been applied.
+## Output schema and reproduction
 
-**Data quality.** Fifty-one retained filings have extraction warnings, including five flagged pairs in each event comparison. Coverage is uneven across sectors, particularly Consumer Discretionary.
+[`outputs/dataset.csv`](outputs/dataset.csv) retains all 450 company-years. `ticker`, `company_name`, `sector`, and `year` identify each observation; `filing_date`, `meeting_date`, `accession`, and `source_url` document provenance; `text_file` identifies the extraction; `theme_shares` and `tone_rates` are JSON measures; `similarity_to_prior` records adjacent-year wording similarity; and `analyst_notes` documents changes, warnings, and gaps.
 
-With additional time, I would recover missing filings, manually review flagged passages and event-related paragraphs, validate theme assignments against human annotations, and test whether findings persist within comparable proxy sections.
-
-For Part 3, these measures provide evidence about **alignment between stated values and disclosed priorities**, rather than proof of organizational authenticity. Sector norms and measurement reliability should inform any resulting index.
-
-## Reproduction
-
-Code resides in [`src/part2/`](../src/part2/), with [`outputs/dataset.csv`](outputs/dataset.csv) as the output. Exact wording-similarity values depend on the original analysis corpus and fixed vocabulary.
-
-Set `SEC_USER_AGENT` and `PART2_LM_DICTIONARY` (the Loughran–McDonald dictionary path) before running.
+The pipeline is in [`src/part2/`](../src/part2/). Set `SEC_USER_AGENT` and `PART2_LM_DICTIONARY` (path to the [Loughran-McDonald dictionary](https://sraf.nd.edu/loughranmcdonald-master-dictionary/)):
 
 ```sh
 uv sync
 uv run playwright install chromium
 uv run python -m src.part2 --dictionary "$PART2_LM_DICTIONARY"
+# Analyze previously collected documents without collecting again:
 uv run python -m src.part2 --analyze-only --dictionary "$PART2_LM_DICTIONARY"
 ```
-
-[edgar]: https://www.sec.gov/edgar/search/
-[dictionary]: https://sraf.nd.edu/loughranmcdonald-master-dictionary/
