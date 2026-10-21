@@ -2,55 +2,127 @@
 
 ## Research objective and findings
 
-This part constructs an **annual, company-level index of alignment between stated values and disclosed priorities**, combining Part 1 About-page themes with Part 2 proxy-statement theme shares. A second component captures whether the mix of disclosed priorities repeatedly reverses direction. The index is best interpreted as a measure of *consistency in corporate communication*, not verified organizational conduct.
+This part develops an **annual Organizational Authenticity Index** to examine how closely companies' stated values match the priorities discussed in their proxy statements.
 
-The dataset includes all **450 company-years** from 2016-2024. An `authenticity_index` is reported only where **both components exist in the same company-year**:
+The index combines two measures:
 
-| Evidence available | Company-years |
+- **Value Alignment:** Does a company give attention to the values it publicly claims to prioritize?
+- **Identity Coherence:** Does the company maintain a reasonably consistent mix of priorities over time, or repeatedly return to earlier patterns?
+
+Together, these measures capture consistency in corporate communication. They do not prove that a company behaves according to its stated values.
+
+The [dataset](outputs/dataset.csv) includes all **450 company-year observations** from 2016 to 2024, including missing data.
+
+| Available evidence | Company-years |
 |---|---:|
-| Both components: complete index | **153** |
+| Both components (complete index) | **153** |
 | Alignment only | 58 |
 | Coherence only | 95 |
 | Neither | 144 |
 
-The 153 complete observations span **44 companies**. The number of complete scores rises from 20 companies in 2019 to 30 in 2024; coherence cannot be calculated in 2016-2018 because it needs four consecutive years of usable proxy data. No missing value is interpreted as zero, and single-component results remain partial evidence rather than substitute authenticity scores.
+The **153 complete scores cover 44 companies**. Complete coverage increases from 20 companies in 2019 to 30 in 2024. Earlier years cannot receive complete scores because coherence requires at least four consecutive years of proxy data.
 
-Across complete company-year observations, the index has a mean of **68.59**, median **70.38**, standard deviation **10.14**, and observed range **20.32-90.00**. These are pooled annual observations, not independent companies, and changing annual coverage makes direct year-to-year comparisons sensitive to sample composition. In **195 of 248** eligible coherence observations, coherence equals 100, indicating limited discrimination in that component.
+Across the complete observations, the index has a **mean of 68.59**, median of **70.38**, standard deviation of **10.14**, and range of **20.32–90.00**. These statistics describe company-year observations, so companies appearing in multiple years are counted more than once. Differences in data availability also limit direct comparisons between years.
 
-## Index construction and assumptions
+## How the index is calculated
 
-**Value alignment** asks whether a company's disclosed emphasis supports each theme it explicitly states. For company `i`, theme `t`, and year `y`:
+### 1. Value Alignment
 
-```text
-benchmark(i,t,y) = max(mean proxy theme share of other sector-year firms, 0.005)
-support(i,t,y) = theme_share(i,t,y) / (theme_share(i,t,y) + benchmark(i,t,y))
-alignment(i,y) = 100 * mean(support over company i's stated themes)
-```
+Part 1 identifies the values each company publicly states. Part 2 measures how much attention those themes receive in its annual proxy statement.
 
-Each peer receives equal weight; the focal company is excluded, and at least five sector-year peers with usable Part 2 shares are required. Peers do not need Part 1 coverage. Only *stated* themes enter the average, so discussing additional legitimate priorities is not automatically penalized. A benchmark-matched share scores 50 where the floor does not bind; zero observed support scores zero. An empty or unavailable stated-theme assessment cannot yield alignment.
-
-**Identity coherence** measures backtracking in ten-theme proxy profiles. Adjacent-year change is `1 - cosine_similarity`. A substantial move is at least **0.0760373**, the linearly interpolated 75th-percentile distance among 360 valid adjacent-year transitions pooled across the full period. For three consecutive profiles `A, B, C`, a reversal requires substantial `A->B` and `B->C` moves and `distance(A,C) < min(distance(A,B), distance(B,C))`.
+For each stated value, the company's proxy theme share is compared with the average share among other companies in the same sector and year.
 
 ```text
-coherence(i,y) = 100 * (1 - reversals / eligible three-year windows)
-authenticity_index(i,y) = (alignment(i,y) + coherence(i,y)) / 2
+Benchmark = max(peer average theme share, 0.005)
+
+Theme support = company theme share
+                / (company theme share + benchmark)
+
+Value Alignment = 100 × average support
+                  across stated values
 ```
 
-Coherence counts all overlapping three-year windows in the uninterrupted history ending in the target year, with at least four consecutive usable years; a gap or all-zero profile resets it. This operationalization permits lasting change and penalizes only qualifying returns toward an earlier profile. The composite weights alignment and coherence equally as a transparent modeling choice, not an empirically estimated optimum.
+A company receives a theme support score of 50 when its share matches the peer average, provided the minimum benchmark does not apply. Greater emphasis produces a higher score, while no matching discussion produces zero.
 
-## Checks, threats to validity, and improvements
+Each peer company receives equal weight. At least five peers with usable data are required, and the company being scored is excluded from its own benchmark. Peers do not need Part 1 observations.
 
-Sensitivity checks vary component weights (70/30 and 30/70), the substantial-change threshold (60th and 90th percentiles), and the alignment benchmark floor (0.001 and 0.01). A further check excludes extraction-warning company-years from both components and recalculates peer benchmarks, the threshold, and coherence histories. Comparisons use matched company-years with both components, while losses of coverage are tracked separately.
+Only publicly stated themes are included. Companies are not penalized simply for discussing other priorities. Missing statements and statements with no identified themes cannot receive alignment scores.
 
-Targeted source checks illustrate both potential correspondence and false signals. In particular, NVIDIA's stock-plan appendices alter keyword-matched proxy profiles, so a low or unstable score does **not** establish weak corporate conduct. A coherence score of 100 means only that no qualifying reversals were detected. Threats include sparse historical About pages, changing page scope, duplicated or procedural proxy text, ambiguous theme matches, and overlapping coherence histories. Full-period calibration and cases where About captures follow proxy filings also preclude interpreting the scores as prospective signals.
+### 2. Identity Coherence
 
-With more time, I would validate labeled passages manually, standardize comparable proxy sections, test alternative thresholds on held-out observations, and supplement disclosures with independent behavioral evidence. These steps are prerequisites for stronger claims about organizational authenticity.
+Coherence examines whether a company's disclosed priorities repeatedly shift back toward earlier patterns.
 
-## Data and reproduction
+Each annual proxy is represented by the same ten-theme profile used in Part 2. The difference between consecutive years is measured using **1 minus cosine similarity**.
 
-[`outputs/dataset.csv`](outputs/dataset.csv) has one row per company-year. Fields include `ticker`, `company_name`, `sector`, `year`; `value_alignment`, `identity_coherence`, `authenticity_index`, `score_basis`; `identity_change`, `transition_status`, `valid_transition_count`, `reversal_count`; `part1_available`, `part2_available`, `stated_theme_count`; and `quality_flags`, `analyst_notes` for provenance and limitations.
+A change is considered substantial when its distance is at least **0.0760373**, the 75th percentile of the 360 observed consecutive-year changes.
 
-[`src/part3/`](../src/part3/) reads the current Part 1 and Part 2 CSVs without modifying them or making network/model requests:
+A reversal occurs when:
+
+- The company makes two substantial changes across three consecutive years (A → B → C).
+- The profile in year C is closer to A than either adjacent comparison, indicating a return toward the earlier pattern.
+
+```text
+Identity Coherence =
+100 × (1 - reversals / eligible three-year windows)
+```
+
+The calculation uses all eligible, overlapping three-year windows in the company's uninterrupted history, ending in the year being scored. At least four consecutive years of usable data are required. Missing years or profiles with no detected themes interrupt the history.
+
+A score of 100 means no qualifying reversals were detected. Importantly, a company can make a lasting change without being penalized. The measure focuses on repeated backtracking, not change itself.
+
+### 3. Final index
+
+```text
+Authenticity Index =
+(Value Alignment + Identity Coherence) / 2
+```
+
+Both components receive equal weight. This is a simple, transparent choice rather than a statistically optimized weighting scheme.
+
+**A complete score is calculated only when both components are available in the same year.** Missing components are never replaced with zero or estimated values.
+
+## Reliability checks and limitations
+
+I tested how sensitive the index is to its main assumptions by:
+
+- Changing the component weights to 70/30 and 30/70.
+- Testing the 60th and 90th percentiles instead of the 75th for substantial changes.
+- Changing the minimum alignment benchmark from 0.005 to 0.001 and 0.01.
+- Excluding observations with extraction warnings and recalculating the affected measures.
+
+Comparisons use the same company-years with complete scores under both settings, and changes in coverage are reported separately.
+
+**The main limitation is that the index measures disclosure patterns, not actual behavior.** Some words may be matched to a theme even when they appear in unrelated contexts. For example, NVIDIA's stock-plan appendices influence its measured priorities, potentially creating misleading changes.
+
+Coherence also has limited ability to distinguish companies: **195 of 248 eligible observations score 100**. This means the absence of detected reversals is common and should not be interpreted as proof of authenticity.
+
+Other limitations include incomplete historical About pages, changes in page content, repeated proxy language, and differences in filing structure. Coherence scores also reuse earlier observations, so annual scores are not independent. Because the method uses information from the full study period and some About-page captures occur after proxy filings, the index is retrospective rather than predictive.
+
+### Realistic improvements
+
+With more time, I would prioritize three improvements:
+
+1. **Check a small sample of theme matches.** Manually review approximately 40–50 selected proxy paragraphs, especially unusual matches and extreme scores, to identify common classification errors.
+2. **Improve ambiguous keyword rules.** Refine the matching vocabulary to exclude procedural language and misleading contexts identified during those checks, then examine how the affected scores change.
+3. **Test more comparable document sections.** Repeat the analysis on a smaller sample using similar proxy sections to see whether differences in document structure influence the results.
+
+These targeted checks would help improve measurement quality without requiring a manual review of every company's reports.
+
+## Dataset and reproduction
+
+[`outputs/dataset.csv`](outputs/dataset.csv) contains one row per company-year, with the following fields:
+
+| Columns | Description |
+|---|---|
+| `ticker`, `company_name`, `sector`, `year` | Company and year identifiers |
+| `value_alignment`, `identity_coherence` | Annual component scores |
+| `authenticity_index`, `score_basis` | Complete index and available evidence |
+| `identity_change`, `transition_status` | Size and type of change in disclosed priorities |
+| `valid_transition_count`, `reversal_count` | History used to calculate coherence |
+| `part1_available`, `part2_available`, `stated_theme_count` | Source coverage and number of stated themes |
+| `quality_flags`, `analyst_notes` | Data-quality issues, missingness, and interpretation notes |
+
+The [implementation](../src/part3/) uses the existing Part 1 and Part 2 datasets without modifying them or making additional API requests.
 
 ```sh
 uv sync
