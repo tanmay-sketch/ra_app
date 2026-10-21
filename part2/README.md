@@ -107,7 +107,7 @@ The [CSV](outputs/dataset.csv) contains one company–meeting-year per row, reta
 | `ticker`, `company_name`, `sector` | Company identity, fixed sector, Part 1 linkage |
 | `year`, `filing_date`, `meeting_date` | Annual-meeting year and verified dates |
 | `accession`, `source_url` | SEC source verification |
-| `text_file` | Cleaned-text path relative to `part2/outputs/` |
+| `text_file` | Reference identifying the text extraction used for analysis |
 | `theme_shares` | JSON shares for ten themes |
 | `tone_rates` | JSON positive, negative, uncertainty rates |
 | `similarity_to_prior` | Adjacent-year TF–IDF cosine |
@@ -129,15 +129,15 @@ For Part 3, these measures provide evidence about **alignment between stated val
 
 ## Reproduction
 
-Code resides in [`src/part2/`](../src/part2/), with [`outputs/dataset.csv`](outputs/dataset.csv) as the tracked output. Cleaned text, audit evidence, and the frozen TF–IDF fit remain local. Exact cosine reproduction requires the original fit.
+Code resides in [`src/part2/`](../src/part2/), with [`outputs/dataset.csv`](outputs/dataset.csv) as the output. Exact wording-similarity values depend on the original analysis corpus and fixed vocabulary.
 
-Collection requires `SEC_USER_AGENT` in `.env`. The financial dictionary is expected at `part2/work/Loughran-McDonald_MasterDictionary_1993-2025.csv`, or specified through `--dictionary`.
+Set `SEC_USER_AGENT` and `PART2_LM_DICTIONARY` (the Loughran–McDonald dictionary path) before running.
 
 ```sh
 uv sync
 uv run playwright install chromium
-uv run python -m src.part2
-uv run python -m src.part2 --analyze-only
+uv run python -m src.part2 --dictionary "$PART2_LM_DICTIONARY"
+uv run python -m src.part2 --analyze-only --dictionary "$PART2_LM_DICTIONARY"
 ```
 
 [edgar]: https://www.sec.gov/edgar/search/

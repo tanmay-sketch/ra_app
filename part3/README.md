@@ -125,12 +125,10 @@ both useful matches and measurement problems:
   title show how keyword matches can produce apparent priorities and reversals.
 
 These were targeted checks, not independent validation of all theme labels.
-Source-linked high and low cases are recorded in
-[`summary.json`](outputs/summary.json). The underlying observations remain unchanged.
 
 ## Sensitivity and limitations
 
-The [sensitivity table](outputs/sensitivity.csv) varies component weights
+Sensitivity analysis varies component weights
 (70/30 and 30/70), the change percentile (60th and 90th), and the benchmark floor
 (0.001 and 0.01). It also excludes extraction warnings and recomputes annual
 peer benchmarks, histories and company averages.
@@ -179,16 +177,9 @@ and duplicate text, and validate thematic matches before making stronger claims.
 | `quality_flags` | JSON list of source, timing and company-level evidence limitations |
 | `analyst_notes` | Coverage and explanation of partial or unavailable scores |
 
-[`summary.json`](outputs/summary.json) records input hashes, settings, company
-statistics by sector and score basis, and annual diagnostics.
-[`distributions.svg`](outputs/distributions.svg) distinguishes score bases;
-[`trajectories.svg`](outputs/trajectories.svg) shows selected annual profiles with
-company-specific vertical scales. Classification uses all ten themes; the plots
-display the three most variable themes.
-
 The [code](../src/part3/) uses existing dependencies and makes no network or model
-requests. Parts 1 and 2 are unchanged. Their CSVs suffice for numerical reproduction;
-local audits and cleaned text enrich review flags but are not required.
+requests. It calculates scores from the Part 1 and Part 2 CSVs without modifying
+them. Rerunning uses the current inputs, so improved source coverage can change scores.
 
 ```sh
 uv sync

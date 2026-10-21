@@ -64,7 +64,7 @@ Classification uses `gpt-4o-mini-2024-07-18` to identify ten categories, consist
 | Community | Social contribution and philanthropy |
 | Shareholders | Long-term value and financial discipline |
 
-Contextual LLM classification accommodates paraphrases and distinguishes explicit commitments from incidental references. Supporting source lines are retained in the local audit for review.
+Contextual LLM classification accommodates paraphrases and distinguishes explicit commitments from incidental references. Category labels must reference supporting source lines.
 
 Adjacent-year comparisons require usable text from consecutive years and the same normalized source URL. HTTP/HTTPS, www, trailing slashes, and default filenames are treated as equivalent. Both comparison fields remain blank when the prior year is missing or the source page changes. After whitespace normalization:
 
@@ -135,8 +135,6 @@ The [output CSV](outputs/dataset.csv) retains one row per company-year, includin
 | `snapshot_url` | Accepted Wayback source for verification |
 | `page_similarity_to_prior_year` | Adjacent-year semantic cosine similarity |
 
-A local audit additionally records page selection, capture attempts, extraction checks, supporting evidence for categories, and model usage.
-
 ## Limitations and next steps
 
 **Coverage and selection bias.** With 59.8% coverage, the sample cannot support unrestricted longitudinal or sector-level generalizations. Comparisons should use matched observations and report sample sizes.
@@ -155,7 +153,7 @@ For Part 3, the dataset provides an initial measure of stated priorities, with *
 
 ## Reproduction
 
-Code is available in [`src/part1/`](../src/part1/) and [`main.py`](../main.py). Execution requires `OPENAI_API_KEY` in the root `.env`.
+Code is available in [`src/part1/`](../src/part1/) and [`main.py`](../main.py). Set `OPENAI_API_KEY` in the environment before running.
 
 ```sh
 uv sync
